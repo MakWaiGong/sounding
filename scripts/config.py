@@ -104,6 +104,18 @@ def tag_prefixes(cfg=None):
     return dict(cfg.get("zotero_tag_prefix", {}))
 
 
+def zotero_collection(cfg=None):
+    """Name of the collection every note-backed item is filed into.
+
+    Notion is the source of truth, so this is only the boundary of what the
+    skill maintains in Zotero: export it to back up, inspect it to audit. Set it
+    to "" to file nothing.
+    """
+    cfg = cfg or load()
+    return os.environ.get("ZOTERO_COLLECTION") or cfg.get("zotero", {}).get(
+        "collection", "sounding")
+
+
 def zotero_api(cfg=None):
     """(base, user_id, api_key) for write requests.
 

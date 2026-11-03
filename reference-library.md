@@ -119,6 +119,25 @@ python scripts/check_config.py
 
 顺序是先条目后笔记：笔记要引用一个在库里真实存在的 citekey。库里没有条目，就先建，不要用一个临时串去写库。
 
+### 6.0 集合：`sounding`
+
+Notion 是主库，Zotero 只承担"存 PDF 与书目信息"的角色。所以库里有一个专用集合 `sounding`（名字取自 `config.local.json` → `zotero.collection`），凡是被本 skill 读过的论文都归档在这里。
+
+它回答的问题是：**这个 skill 维护的那批东西，边界在哪**。由此得到三个用法，也仅此三个：
+
+- 导出它，就是一次完整备份（条目 + PDF）。
+- 打开它，就是"这些论文我按 sounding 读过"，不用在几百条里翻。
+- 它为空或丢了，重跑一次 `zotero_add.py` 就能重建。
+
+它**不是**查询主键。找一篇论文仍然按 citekey，与集合无关；集合成员关系是投影，可以随时重建。这样即使你在 Zotero 里大改结构、合并集合、删掉重建，也不会影响 skill 找到东西。
+
+两条纪律：
+
+- skill 只往 `sounding` 写，不往里搬别的东西；你自己随手导入的论文不进这个集合，备份边界因此不会被稀释。
+- 一个条目可以同时在 `sounding` 和课题集合里（如 `分子胶新`）。Zotero 的集合是多对多，两边不冲突：课题集合供你按项目浏览，`sounding` 供备份与审计。
+
+`zotero_write.py` / `zotero_add.py` 都只做并集：读取现有 `collections` 再追加，绝不覆盖——写入 `collections` 字段是整表替换，漏读就会把条目从其它集合里踢出去。
+
 ### 6.1 条目不存在时：建条目并挂 PDF
 
 ```bash

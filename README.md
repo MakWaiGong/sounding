@@ -38,7 +38,7 @@
 | `scripts/setup.py` | 首次配置：探测 Zotero 路径、写 key、认 Notion 库 |
 | `scripts/check_config.py` | 体检：配置项、字段映射、select 合法值 |
 | `scripts/zotero_find.py` | 查库：按作者／标题／citekey 找，打印 PDF 路径与在用标签 |
-| `scripts/zotero_add.py` | 建条目并上传 PDF，写 `Citation Key` 与 `Notion` 到 Extra |
+| `scripts/zotero_add.py` | 建条目、上传 PDF、并入 `sounding` 集合，写 `Citation Key` 与 `Notion` 到 Extra |
 | `scripts/zotero_write.py` | 回写三族标签与 Notion 链接，合并式，不动手写标签 |
 | `scripts/fig.py` | 扫图注、裁图、渲染页面 |
 
@@ -153,6 +153,20 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 三族标签是三个独立的多选字段，因为 Notion 多选不支持嵌套。Zotero 侧标签是扁平的，靠 `p:` / `m:` / `d:` 前缀保留维度。
 
 任何映射字段在库里不存在，skill 停下报告，不丢值。
+
+## Zotero 里怎么放
+
+Notion 是主库，Zotero 只存 PDF 与书目信息。被本 skill 读过的条目统一进一个集合 `sounding`（`config.local.json` → `zotero.collection`，`--no-collection` 可关）。
+
+| 用途 | 怎么用 |
+| --- | --- |
+| 备份 | 导出 `sounding` 就是完整一份（条目 + PDF） |
+| 浏览 | 打开它，就是"按这套方法读过的"那一批，不必在几百条里翻 |
+| 重建 | 集合没了重跑 `zotero_add.py`，成员关系是投影不是事实源 |
+
+它不是查询主键：找论文一律按 citekey，与集合无关。所以你在 Zotero 里合并集合、改组结构，都不影响 skill 落库。
+
+一个条目可以同时在 `sounding` 和课题集合（如 `分子胶新`）里——Zotero 集合是多对多，两边不冲突：课题集合供按项目浏览，`sounding` 供备份与审计。写入时脚本先读现有 `collections` 再追加，因为该字段是整表替换，漏读会把条目从别的集合踢出去。
 
 ## Notion 工具
 

@@ -256,6 +256,53 @@ def file_present(base, user_id, key, api_key):
         return False
 
 
+def resolve_collection(base, user_id, api_key, name, create=True):
+    """Find a top-level collection by name, creating it when missing.
+
+    Notion is the source of truth; this collection is the boundary of what the
+    skill maintains in Zotero. It is a projection, never a lookup key: items are
+    found by citekey, so deleting the collection costs nothing but a rebuild.
+    """
+    status, _, data = request("GET", f"{base}/users/{user_id}/collections?limit=100",
+                              api_key)
+    if status != 200 or not isinstance(data, list):
+        return None, f"could not list collections: HTTP {status} {data}"
+    for c in data:
+        d = c.get("data", {})
+        if d.get("name") == name and not d.get("parentCollection"):
+            return d.get("key"), None
+    if not create:
+        return None, f"collection {name!r} not found"
+    status, _, resp = request("POST", f"{base}/users/{user_id}/collections", api_key,
+                              [{"name": name, "parentCollection": False}],
+                              {"Zotero-Write-Token": write_token()})
+    if status != 200:
+        return None, f"could not create collection {name!r}: HTTP {status} {resp}"
+    ok = resp.get("successful", {}).get("0", {}) if isinstance(resp, dict) else {}
+    key = ok.get("key") or ok.get("data", {}).get("key")
+    if not key:
+        return None, f"could not create collection {name!r}: no key in {resp}"
+    print(f"collection: created {name!r} ({key})")
+    return key, None
+
+
+def ensure_in_collection(base, user_id, api_key, item_key, collection_key):
+    """Union membership. A PATCH with `collections` replaces the list, so the
+    item's other collections must be read first and carried over."""
+    status, _, cur = request("GET", f"{base}/users/{user_id}/items/{item_key}", api_key)
+    if status != 200 or not isinstance(cur, dict):
+        return f"could not read item {item_key}: HTTP {status} {cur}"
+    have = list(cur.get("data", {}).get("collections") or [])
+    if collection_key in have:
+        return None
+    status, _, resp = request("PATCH", f"{base}/users/{user_id}/items/{item_key}", api_key,
+                              {"collections": have + [collection_key]},
+                              {"If-Unmodified-Since-Version": str(cur.get("version", 0))})
+    if status not in (200, 204):
+        return f"could not add {item_key} to collection: HTTP {status} {resp}"
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf", required=True)
@@ -279,7 +326,9 @@ def main():
     ap.add_argument("--url")
     ap.add_argument("--abstract")
     ap.add_argument("--language", default="en")
-    ap.add_argument("--collection", help="collection key to file it under")
+    ap.add_argument("--collection", help="collection name; defaults to zotero.collection")
+    ap.add_argument("--no-collection", action="store_true",
+                    help="do not file the item into the skill's collection")
     ap.add_argument("--item-key", help="retry the upload for an item that exists")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
@@ -298,6 +347,17 @@ def main():
     if a.notion:
         extra_lines.append(f"Notion: {a.notion}")
     extra = "\n".join(extra_lines) + "\n"
+
+    # The collection is resolved before anything is written: a typo in the name
+    # should fail here, not leave a pile of items filed nowhere.
+    collection_key = None
+    if not a.no_collection:
+        cname = a.collection or config.zotero_collection(cfg)
+        if cname:
+            collection_key, err = resolve_collection(base, user_id, api_key, cname)
+            if err:
+                sys.exit(err)
+            a.collection = collection_key
     data = build_item(a, tags, extra)
 
     if a.dry_run:
@@ -351,7 +411,15 @@ def main():
         created = key
         print(f"created item {key}")
 
-    # 2. attach the PDF, unless this item already has a working file attachment
+    # 2. make sure it is filed in the skill's collection (create path already
+    #    set it; the update path excluded `collections` from the patch on purpose)
+    if collection_key:
+        err = ensure_in_collection(base, user_id, api_key, key, collection_key)
+        if err:
+            sys.exit(err)
+        print(f"collection: {key} is in {collection_key}")
+
+    # 3. attach the PDF, unless this item already has a working file attachment
     status, _, children = request("GET", f"{base}/users/{user_id}/items/{key}/children",
                                   api_key)
     kids = children if isinstance(children, list) else []

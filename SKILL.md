@@ -218,7 +218,9 @@ python scripts/zotero_add.py --pdf "<绝对路径>" \
   --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
 ```
 
-它按 citekey 与标题查重，命中就更新，不建重复条目；PDF 作为 `imported_file` 子条目上传；`Extra` 写 `Citation Key:` 与 `Notion:` 两行，这样 Better BibTeX 不会另生成一个 key。建完再把标签与链接回写一次（`zotero_write.py`）也安全，它是合并式的。
+它按 citekey 与标题查重，命中就更新，不建重复条目；PDF 作为 `imported_file` 子条目上传；`Extra` 写 `Citation Key:` 与 `Notion:` 两行，这样 Better BibTeX 不会另生成一个 key；条目并入 `sounding` 集合（名字取自配置，`--no-collection` 可关）。建完再把标签与链接回写一次（`zotero_write.py`）也安全，它是合并式的。
+
+`sounding` 集合只做备份边界，不做查询主键：找论文一律按 citekey。导出它就是一次完整备份，删了重跑就重建。
 
 **第二步：按 citekey 在 `Papers` 里查。**
 

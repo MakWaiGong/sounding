@@ -7,7 +7,10 @@
     "data_dir": "",
     "user_id": "",
     "api_key": "",
-    "api_base": "https://api.zotero.org"
+    "api_base": "https://api.zotero.org",
+
+    "_collection_comment": "Every item the skill writes is filed into this collection. Notion is the source of truth; the collection is only the boundary of what to back up and audit. Set to \"\" to file nothing.",
+    "collection": "sounding"
   },
 
   "notion": {
