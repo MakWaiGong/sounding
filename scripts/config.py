@@ -1,7 +1,8 @@
 """Load the skill config.
 
 Resolution order for every value:
-  1. config.local.json in the skill directory (the user's own copy)
+  1. config.local.json in the skill directory (the user's own copy),
+     or the file named by SOUNDING_CONFIG
   2. environment variables
   3. config.example.json in the skill directory (shipped defaults)
 
@@ -18,13 +19,26 @@ SETUP_HINT = ('run "python scripts/setup.py" in the skill directory, '
               'or ask the user for the value and pass it as a flag')
 
 
+def config_path():
+    """Where the user's own config lives.
+
+    Defaults to config.local.json beside this file. SOUNDING_CONFIG overrides
+    it, so one clone can serve several agents (Cursor, Claude Code, Codex, ...)
+    or several clones can share one config without copying secrets around.
+    """
+    env = os.environ.get("SOUNDING_CONFIG")
+    if env:
+        return os.path.abspath(os.path.expanduser(env))
+    return LOCAL
+
+
 def is_configured():
     """True once the user's own config exists and names a real database.
 
     Scripts use this to decide between "ask the user" and "carry on"; nothing
     here guesses a path.
     """
-    if not os.path.exists(LOCAL):
+    if not os.path.exists(config_path()):
         return False
     return bool(zotero_db(load()))
 
@@ -35,8 +49,9 @@ def load():
     if os.path.exists(EXAMPLE):
         with open(EXAMPLE, encoding="utf-8") as f:
             cfg.update(json.load(f))
-    if os.path.exists(LOCAL):
-        with open(LOCAL, encoding="utf-8") as f:
+    local = config_path()
+    if os.path.exists(local):
+        with open(local, encoding="utf-8") as f:
             cfg.update(json.load(f))
     return cfg
 

@@ -28,8 +28,27 @@
 
 ## 安装
 
+它是一个标准的 Agent Skill：一个目录，入口是带 YAML frontmatter 的 `SKILL.md`。凡是认这个格式的 agent 都能直接用——Cursor、Claude Code、Codex CLI，以及其他实现了 Agent Skills 的工具。脚本用自身路径定位文件，不假设被装在哪里，所以不需要为不同 agent 改代码。
+
+把整个目录放进那个 agent 的 skills 目录：
+
+| Agent | 个人级 | 项目级 |
+| --- | --- | --- |
+| Cursor | `~/.cursor/skills/sounding` | `.cursor/skills/sounding` |
+| Claude Code | `~/.claude/skills/sounding` | `.claude/skills/sounding` |
+| Codex CLI | `~/.codex/skills/sounding` | — |
+
+三者的布局一致：`<skills>/<name>/SKILL.md`。用别的工具就查它的文档，只要是同一格式，放进去即可。
+
+用在多个 agent 里时**不要复制多份**——复制就会不同步。做链接：
+
 ```bash
-git clone <repo> ~/.cursor/skills/sounding
+# macOS / Linux
+ln -s /path/to/sounding ~/.cursor/skills/sounding
+ln -s /path/to/sounding ~/.claude/skills/sounding
+
+# Windows：目录联接，不需要管理员权限
+mklink /J "%USERPROFILE%\.cursor\skills\sounding" "D:\code\sounding"
 ```
 
 裁图脚本需要 Python 3 + `pymupdf`：
@@ -37,6 +56,8 @@ git clone <repo> ~/.cursor/skills/sounding
 ```bash
 pip install pymupdf
 ```
+
+文档里的 `python` 在 macOS / Linux 上通常是 `python3`。
 
 ## 首次使用
 
@@ -63,6 +84,17 @@ python scripts/setup.py
 ```bash
 cp config.example.json config.local.json
 ```
+
+配置只有一份。多个 agent 共用同一个 clone 时，配置就在 clone 里，自动共享；如果 clone 分散在几处，用 `SOUNDING_CONFIG` 指到同一个文件，不必把 API key 复制到每个目录：
+
+```bash
+# Windows
+setx SOUNDING_CONFIG "%USERPROFILE%\.sounding\config.local.json"
+# macOS / Linux
+export SOUNDING_CONFIG=~/.sounding/config.local.json
+```
+
+`setup.py` 会写到这个位置，`--check` 也会从它读。
 
 然后改 `config.local.json`：
 

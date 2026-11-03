@@ -111,20 +111,21 @@ def main():
     a = ap.parse_args()
 
     # Start from whatever is already there so a re-run never loses values.
+    cfg_path = config.config_path()
     base = {}
     if os.path.exists(config.EXAMPLE):
         with open(config.EXAMPLE, encoding="utf-8") as f:
             base.update(json.load(f))
-    local_exists = os.path.exists(config.LOCAL)
+    local_exists = os.path.exists(cfg_path)
     if local_exists:
-        with open(config.LOCAL, encoding="utf-8") as f:
+        with open(cfg_path, encoding="utf-8") as f:
             base.update(json.load(f))
 
     z = base.setdefault("zotero", {})
     n = base.setdefault("notion", {})
 
     if a.check:
-        print(f"config file : {'found' if local_exists else 'MISSING'}  {config.LOCAL}")
+        print(f"config file : {'found' if local_exists else 'MISSING'}  {cfg_path}")
         db = z.get("db_path") or ""
         ok, msg = inspect_db(db) if db else (False, "not set")
         print(f"zotero db   : {'ok' if ok else 'BAD'}  {db or '(empty)'}  -- {msg}")
@@ -196,10 +197,10 @@ def main():
         n["papers_data_source_id"] = a.notion_ds
 
     # --- write -----------------------------------------------------------
-    with open(config.LOCAL, "w", encoding="utf-8") as f:
+    with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(base, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"\nwritten: {config.LOCAL}")
+    print(f"\nwritten: {cfg_path}")
 
     todo = []
     if not z.get("api_key"):

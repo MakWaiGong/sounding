@@ -56,6 +56,8 @@ python scripts/setup.py --zotero-db "<含 zotero.sqlite 的路径>" --zotero-key
 
 `user_id` 由脚本拿 key 反查，不问用户。写之前先 `python scripts/setup.py --check` 看当前缺什么；重新跑不会覆盖已填的值。
 
+配置默认写在 `SKILL_DIR/config.local.json`；设了环境变量 `SOUNDING_CONFIG` 就写到那个路径，方便多个 agent 共用一份配置。
+
 API key 可以不给：读库、裁图、写笔记都照常，只有回写 Zotero 会失败。这种情况要明确告诉用户「标签和 Notion 链接没有回写」，不能假装写了。
 
 `papers_data_source_id`（`collection://…`）脚本填不了：用 Notion 工具打开那个库，从返回的 `<data-source url="…">` 取，再补进配置。
