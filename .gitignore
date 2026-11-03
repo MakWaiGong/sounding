@@ -1,0 +1,13 @@
+# personal config: paths, API key, Notion ids -- never committed
+config.local.json
+*.local.json
+notes/
+
+# python
+*.pyc
+__pycache__/
+.venv/
+
+# os
+Thumbs.db
+.DS_Store

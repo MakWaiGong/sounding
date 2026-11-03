@@ -1,0 +1,56 @@
+{
+  "_comment": "Copy this file to config.local.json and fill in your own paths and ids. Every value here is a placeholder or empty; the skill will stop and ask if it needs something you have not set.",
+
+  "zotero": {
+    "_api_comment": "db_path/data_dir are used by the lookup scripts. user_id and api_key are only used by zotero_write.py: create a key at https://www.zotero.org/settings/keys with library access + write access (+ notes access if you also write child notes).",
+    "db_path": "",
+    "data_dir": "",
+    "user_id": "",
+    "api_key": "",
+    "api_base": "https://api.zotero.org"
+  },
+
+  "notion": {
+    "papers_database_id": "",
+    "papers_data_source_id": "",
+
+    "_properties_comment": "Maps the skill's fixed concept names to the actual field names in your papers database. If a concept here has no matching field in the database, the skill stops and reports it rather than dropping the value.",
+    "properties": {
+      "title": "",
+      "venue": "",
+      "year": "",
+      "type": "",
+      "citekey": "",
+      "read_level": "",
+      "problem": "",
+      "method": "",
+      "data": "",
+      "verdict": "",
+      "topic": "",
+      "domain": "",
+      "wave": "",
+      "group": "",
+      "confidence": "",
+      "role": "",
+      "generation": "",
+      "generation_name": "",
+      "opened": "",
+      "borrowed_from": "",
+      "followers": ""
+    },
+
+    "_option_values_comment": "The legal values of the select fields. read_level, type and verdict are the ones the skill sets on its own.",
+    "option_values": {
+      "read_level": ["扫", "精读"],
+      "type": ["conference", "journal", "review", "other"],
+      "verdict": ["值得跟进", "存档", "仅作背景"]
+    }
+  },
+
+  "_tag_prefix_comment": "Zotero tags are flat, so each tag family is carried by a prefix. Notion uses three separate multi-select fields and needs no prefix.",
+  "zotero_tag_prefix": {
+    "problem": "p:",
+    "method": "m:",
+    "data": "d:"
+  }
+}
