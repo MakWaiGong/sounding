@@ -117,6 +117,26 @@ python scripts/check_config.py
 
 ## 6 回写 Zotero
 
+顺序是先条目后笔记：笔记要引用一个在库里真实存在的 citekey。库里没有条目，就先建，不要用一个临时串去写库。
+
+### 6.1 条目不存在时：建条目并挂 PDF
+
+```bash
+python scripts/zotero_add.py --pdf "<绝对路径>" \
+  --title "<论文全称>" --authors "First Last;First Last" \
+  --year 2026 --venue "AAAI" --type conference \
+  --citekey chengProAR2026 --notion "<Notion URL>" \
+  --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
+```
+
+- `--type` 与笔记里的 `类型` 一致，脚本据此选 Zotero 的 itemType（conference → `conferencePaper`，journal/review → `journalArticle`，other → `document`）。
+- `--venue` 只放刊名／会议名，不带年份，与 Notion 的 `发表` 字段同值。
+- 查重两条路：本地库的 `citationKey`，以及服务端按标题精确匹配。命中就更新该条目，不建重复。
+- PDF 作为 `imported_file` 子条目上传。上传成功后才回填 `md5`／`mtime`；如果中途失败，脚本会删掉留下的空附件再重试，不会积累一堆无文件的条目。
+- `Extra` 自动写入两行：`Citation Key: <key>` 与 `Notion: <url>`。写 `Citation Key` 是为了让 Better BibTeX 不再自己生成一个不同的 key，否则同一篇会有两个 citekey。
+
+### 6.2 条目已存在时：写标签与链接
+
 三件事，缺一不可：
 
 1. `Extra` 加一行 `Notion: <页面 URL>`。已有则替换那一行，不要留成两行。
@@ -140,7 +160,7 @@ python scripts/zotero_write.py --citekey <citekey> \
 
 失败就报错，不要静默跳过：告诉用户哪一步失败、条目 key 是什么；笔记本身照常产出。
 
-**不会做的事**：不建条目、不下载 PDF、不在 PDF 上画批注。批注（annotation）是本地表里的对象，Web API 没有对应端点；能在 API 层写的只有笔记（note）。
+**不会做的事**：不下载付费墙后的 PDF、不在 PDF 上画批注。批注（annotation）是本地表里的对象，Web API 没有对应端点；能在 API 层写的只有笔记（note）。
 
 ---
 
