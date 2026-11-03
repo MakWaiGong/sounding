@@ -4,6 +4,20 @@ These rules apply to every paper type. Templates reference them; they are not re
 
 ---
 
+## Figures
+
+Three rules, all of them about not inventing anything:
+
+1. **The caption is the paper's caption, verbatim.** Copy it from the PDF, including the `Figure N:` prefix. Undo the PDF's end-of-line hyphenation (`explic- itly` → `explicitly`, `time- coupled` → `time-coupled`) and rejoin the lines, but change no word. A caption is the authors' statement of what the figure shows; rewording it silently substitutes your reading for theirs.
+2. **The number is the paper's number.** If the first image in the note is the paper's Figure 2, it is Figure 2. Never renumber by order of appearance in the note, and never call it "图一" because it comes first there. The same applies when citing a figure in prose: use the paper's number.
+3. **Your own explanation goes elsewhere.** Reconstruct what the figure shows in the section body — block by block, in the figure's own layout order. If a Chinese gloss helps, put it on its own line marked `译：`, so the original and the gloss never mix.
+
+If the caption is too long to sit under the image, keep it whole and let the body carry the reading. Truncating is allowed only at a sentence boundary, marked with `…`, and never at the cost of dropping what the figure is for.
+
+When the source language is not English, quote the caption in the source language. Do not translate in place.
+
+---
+
 ## Symbol table
 
 Mandatory when the paper has equations.
