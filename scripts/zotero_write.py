@@ -19,38 +19,27 @@ other tag is left alone.
 import argparse
 import json
 import os
-import shutil
-import sqlite3
 import sys
-import tempfile
-import time
 import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import paper_identity as identity  # noqa: E402
 
 
 def item_key_from_citekey(citekey, cfg):
-    """Look the item key up in a copy of the local database."""
+    """Resolve an existing key or DOI using the shared read-only snapshot."""
     db = config.zotero_db(cfg)
     if not db or not os.path.exists(db):
         return None, "no zotero.db_path configured"
-    tmp = os.path.join(tempfile.gettempdir(), "zotero_write_copy.sqlite")
-    shutil.copyfile(db, tmp)
-    c = sqlite3.connect(tmp)
-    rows = c.execute("""
-        select i.key from itemData d
-        join fieldsCombined f on d.fieldID = f.fieldID
-        join itemDataValues v on d.valueID = v.valueID
-        join items i on d.itemID = i.itemID
-        where f.fieldName = 'citationKey' and v.value = ?""", (citekey,)).fetchall()
-    c.close()
-    if not rows:
+    try:
+        item = identity.lookup_local(db, citekey)
+    except identity.IdentityError as e:
+        return None, str(e)
+    if not item:
         return None, f"citekey {citekey!r} not found in the local library"
-    if len(rows) > 1:
-        return None, f"citekey {citekey!r} matches {len(rows)} items; fix it in Zotero first"
-    return rows[0][0], None
+    return item["item_key"], None
 
 
 def request(method, url, api_key, body=None, headers=None):
@@ -63,7 +52,7 @@ def request(method, url, api_key, body=None, headers=None):
         h["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             raw = r.read()
             return r.status, dict(r.headers), (json.loads(raw) if raw else None)
     except urllib.error.HTTPError as e:
@@ -76,43 +65,59 @@ def request(method, url, api_key, body=None, headers=None):
 
 
 def merge_tags(existing, wanted, prefixes):
-    """Drop the skill's own prefixed tags, keep everything else, add the new ones."""
-    pref = tuple(p for p in prefixes.values() if p)
-    kept, names = [], set()
-    for t in existing or []:
-        name = t.get("tag", "")
-        if pref and name.startswith(pref):
-            continue
-        if name not in names:
-            kept.append({"tag": name})
-            names.add(name)
-    for name in wanted:
-        if name and name not in names:
-            kept.append({"tag": name})
-            names.add(name)
-    return kept
+    return identity.merge_tags(existing, wanted, prefixes)
 
 
 def merge_extra(existing, url):
-    lines = [l for l in (existing or "").splitlines()
-             if not l.strip().lower().startswith("notion:")]
-    lines.append(f"Notion: {url}")
-    return "\n".join(lines).strip() + "\n"
+    return identity.merge_extra(existing, notion=url)
 
 
 def tag_names(item):
-    return [t.get("tag", "") for t in item.get("tags", [])]
+    return [t.get("tag", "") for t in item.get("data", item).get("tags", [])]
+
+
+def patch_with_retry(request_fn, url, api_key, make_patch, item=None):
+    """Retry one version conflict, rebuilding the merge from the fresh object."""
+    for attempt in range(2):
+        if item is None:
+            status, _, item = request_fn("GET", url, api_key)
+            if status != 200 or not isinstance(item, dict) or "data" not in item:
+                raise RuntimeError(f"could not read item: HTTP {status} {item}")
+        patch = make_patch(item)
+        if not patch:
+            return {"Last-Modified-Version": str(item.get("version", 0))}, None
+        status, headers, data = request_fn("PATCH", url, api_key, patch,
+                                         {"If-Unmodified-Since-Version": str(item.get("version", 0))})
+        if status in (200, 204):
+            return headers, data
+        if status == 412 and attempt == 0:
+            item = None
+            continue
+        raise RuntimeError(f"write failed: HTTP {status} {data}")
+
+
+def write_patch(item, tags, extra, prefixes):
+    data = item["data"]
+    patch = {}
+    if tags is not None:
+        wanted = [t.strip() for t in tags.split(",") if t.strip()]
+        patch["tags"] = merge_tags(data.get("tags"), wanted, prefixes)
+    if extra is not None:
+        patch["extra"] = merge_extra(data.get("extra"), extra)
+    return patch
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--citekey", required=True)
+    ap.add_argument("--citekey")
     ap.add_argument("--item-key", help="skip the local lookup and use this key")
     ap.add_argument("--tags", help="comma-separated, with family prefixes")
     ap.add_argument("--extra", help="Notion page URL to record in Extra")
     ap.add_argument("--show", action="store_true", help="print the item, write nothing")
     ap.add_argument("--dry-run", action="store_true", help="print the change, write nothing")
     a = ap.parse_args()
+    if not a.citekey and not a.item_key:
+        ap.error("give --citekey or --item-key")
 
     cfg = config.load()
     base, user_id, api_key = config.zotero_api(cfg)
@@ -128,7 +133,7 @@ def main():
 
     url = f"{base}/users/{user_id}/items/{key}"
     status, _, item = request("GET", url, api_key)
-    if status != 200:
+    if status != 200 or not isinstance(item, dict) or "data" not in item:
         sys.exit(f"could not read item {key}: HTTP {status} {item}")
 
     if a.show:
@@ -140,59 +145,24 @@ def main():
         print(f"extra   : {extra[:300] or '(none)'}")
         return
 
-    if not a.tags and not a.extra:
+    if a.tags is None and a.extra is None:
         sys.exit("nothing to write: pass --tags and/or --extra (or --show)")
 
-    patch = {}
-    if a.tags:
-        wanted = [t.strip() for t in a.tags.split(",") if t.strip()]
-        before = tag_names(item)
-        after = [t["tag"] for t in merge_tags(item.get("tags"), wanted, config.tag_prefixes(cfg))]
-        patch["tags"] = merge_tags(item.get("tags"), wanted, config.tag_prefixes(cfg))
-        print("tags before :", ", ".join(before) or "(none)")
-        print("tags after  :", ", ".join(after) or "(none)")
-    if a.extra:
-        old = item.get("data", {}).get("extra", "")
-        patch["extra"] = merge_extra(old, a.extra)
-        print("extra before:", (old or "(none)").replace("\n", " / ")[:200])
-        print("extra after :", patch["extra"].replace("\n", " / ").strip()[:200])
+    make_patch = lambda current: write_patch(current, a.tags, a.extra, config.tag_prefixes(cfg))
+    patch = make_patch(item)
+    print(json.dumps(patch, ensure_ascii=False, indent=2))
 
     if a.dry_run:
         print("dry run: nothing written")
         return
 
-    def ok(status):
-        # Zotero answers a single-object write with 204 No Content.
-        return status in (200, 204)
-
-    def report(status, headers, data):
-        ver = data.get("version") if isinstance(data, dict) else None
-        ver = ver or headers.get("Last-Modified-Version", "?")
-        print(f"written: item {key} now at version {ver}")
-
-    version = item.get("version", 0)
-    for attempt in (1, 2):
-        status, headers, data = request("PATCH", url, api_key, patch,
-                                        {"If-Unmodified-Since-Version": str(version)})
-        if ok(status):
-            report(status, headers, data)
-            return
-        if status == 412 and attempt == 1:
-            print("item changed while writing; refetching once")
-            status, _, item = request("GET", url, api_key)
-            version = item.get("version", 0)
-            continue
-        if status == 429:
-            wait = int(headers.get("Retry-After", 5) or 5)
-            print(f"rate limited; waiting {wait}s")
-            time.sleep(wait)
-            status, headers, data = request("PATCH", url, api_key, patch,
-                                            {"If-Unmodified-Since-Version": str(version)})
-            if ok(status):
-                report(status, headers, data)
-                return
-        sys.exit(f"write failed: HTTP {status} {data}")
+    headers, data = patch_with_retry(request, url, api_key, make_patch, item)
+    ver = (data.get("version") if isinstance(data, dict) else None) or headers.get("Last-Modified-Version", "?")
+    print(f"written: item {key} now at version {ver}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as e:
+        sys.exit(str(e))

@@ -1,40 +1,24 @@
 ---
 name: sounding
-description: 一套读文献的方法，不是一套笔记模板。四个动作按序：选（先读哪几篇）、拆（一篇的论证靠什么立住）、放（属于哪一波潮、第几代）、判（这个方向还缺什么）。按论文结构而非发表处选骨架：conference 四段式、journal 三段式、other 通用式、scan 三行。笔记固定含 10 行速览、原 PDF 裁图、符号表、每个损失项在防哪种失败模式、指标定义与互补盲区、湿实验六项。落库按 citekey 幂等，自动补齐 Zotero 条目与 PDF 并回写链接。Use when the user asks to read, deconstruct, annotate or summarise a paper (读这篇, 拆这篇, 精读, 文献笔记, 测深, paper reading), to survey or map a literature (调研, 扫一遍这个方向, 这个方向有哪些工作, 文献综述, 观潮, lit review, map the field), or to decide what to read next.
+description: 把一篇研究论文拆成结构化笔记，并把它放回所属的那波潮。按论文结构（不看发表处）在四种骨架里选一种：conference 四段式、journal 三段式、other 通用式、scan 三行。笔记固定含 10 行速览、从原 PDF 裁下的图、覆盖公式每个符号的符号表、每个损失项在防哪种失败模式、指标定义与其互补盲区、湿实验的 n／重复／检验／离散度／p 值／多重比较校正。落库按 citekey 幂等并回写 Zotero。Use when the user asks to read, deconstruct, annotate or summarize a paper (读这篇, 拆这篇, 精读, 文献笔记, 观潮, 测深, paper reading, sounding), or to add a paper to the reading library.
 ---
 
 # 观潮 / Sounding
 
-读文献不是攒摘要。它是一条链：把一篇论文的论证重建出来 → 把一批论文放到同一张地图上 → 说出这个方向还缺什么。断在第一环，后面全是印象；只做第三环，前面全是听来的。
-
-## 这是什么
-
-一套方法，不是一套模板。模板是它的产物，读之前不用看。方法由四个动作组成，顺序固定；可以停在任一环，但不能跳：
-
-| 动作 | 问的问题 | 在哪 |
-| --- | --- | --- |
-| 选 | 这一批里先读哪几篇，哪几篇只扫 | §13 |
-| 拆 | 这篇的结论靠什么立住，证据到哪为止 | §3–§6 |
-| 放 | 它属于哪一波潮、第几代、谁在推 | §7 |
-| 判 | 这个方向现在缺什么，缺的那一格可不可测 | §13 收口 |
-
-## 三层，里层是外层的输入
+两层，里面的先做。
 
 | 层 | 做什么 | 产物 |
 | --- | --- | --- |
 | 测深 | 拆开一篇：重建它的论证，不转述它的文字 | 一份笔记 |
-| 观潮 | 把一批放回去：哪一波潮、哪个组、第几代、开了什么 | 潮图上的位置 |
-| 立判 | 合起来说：缺什么，下一步做什么 | 课题页里的一句判断 |
+| 观潮 | 把这篇放回去：哪一波潮、哪个组、第几代、开了什么 | 笔记末尾的定位 + 全局潮图 |
 
 顺序不能反。位置判断要在读懂之后做；先有判断再读，读到的都是支持那个判断的东西。
 
-四条不可破：
+三条不可破：
 
 - **复述，不评判。** 不写「这部分偏弱」「我认为」。覆盖度的事实要写：`原文未报告`、`只在附录给了这个数`、`未给置信区间`。
 - **每个数字带出处。** 后面跟 `Fig. 3` / `Table 2` / `Sec. 4.2`。没有出处的数字不进笔记。
 - **图裁不画。** 裁原 PDF，不重画、不叠标注文字。表格不截图，重打成 markdown，数字要能被搜到。
-- **图注照抄，图号照旧。** 图注逐字取原文（含 `Figure N:` 前缀），只去掉 PDF 换行造成的断词；图号用论文里的编号，笔记里第几张图与图号无关——第一张图如果是文献的 Figure 2，就叫 Figure 2。自己的解读放正文，不放图注。
-- **判断要可被推翻。** 「这个方向缺 X」后面必须跟「什么证据会推翻它」。写不出来的，是印象不是判断，不进课题页。
 
 `SKILL_DIR` 是放本文件的目录；脚本在 `scripts/`，用 `python` 调用。
 
@@ -49,34 +33,9 @@ description: 一套读文献的方法，不是一套笔记模板。四个动作�
 | `reference-metrics.md` | 要定义具体指标时 —— CS 指标与统计术语 |
 | `reference-tags.md` | 打标签时 —— 三族受控词表 |
 | `reference-library.md` | 落库时 —— 字段映射、幂等、回写 |
+| `reference-engineering.md` | 提取 PDF、批量裁图、机械校验、恢复中断任务时 —— 命令与中间文件约定 |
 | `reference-wave.md` | 做观潮判断时 —— 潮／组／世代／开创 的判据 |
 | `reference-topic.md` | 维护课题页时 |
-
-## 0 首次使用：先要到配置
-
-每个用户的 Zotero 路径、API key、Notion 库 id 都不一样，这些不进仓库。`config.local.json` 不存在、或 `zotero.db_path` 为空时，先把下面几项问清，再开始读论文。
-
-一次问完，不要边读边问：
-
-| 要问的 | 怎么答 | 能不能自动 |
-| --- | --- | --- |
-| Zotero 数据目录 | 含 `zotero.sqlite` 的那个目录 | 能。`setup.py` 探测常见位置，探到就让用户确认 |
-| Zotero API key | https://www.zotero.org/settings/keys 新建，勾 library access + write access（要写子笔记再勾 notes） | 不能，用户自己去建 |
-| Notion Papers 库链接 | 整条 URL 粘过来即可，也接受 32 位 id 或带横线的 uuid | 不能 |
-
-拿到后一条命令写进去：
-
-```bash
-python scripts/setup.py --zotero-db "<含 zotero.sqlite 的路径>" --zotero-key <key> --notion-db "<url>"
-```
-
-`user_id` 由脚本拿 key 反查，不问用户。写之前先 `python scripts/setup.py --check` 看当前缺什么；重新跑不会覆盖已填的值。
-
-配置默认写在 `SKILL_DIR/config.local.json`；设了环境变量 `SOUNDING_CONFIG` 就写到那个路径，方便多个 agent 共用一份配置。
-
-API key 可以不给：读库、裁图、写笔记都照常，只有回写 Zotero 会失败。这种情况要明确告诉用户「标签和 Notion 链接没有回写」，不能假装写了。
-
-`papers_data_source_id`（`collection://…`）脚本填不了：用 Notion 工具打开那个库，从返回的 `<data-source url="…">` 取，再补进配置。
 
 ## 1 输入归一
 
@@ -87,9 +46,9 @@ API key 可以不给：读库、裁图、写笔记都照常，只有回写 Zoter
 | citekey，如 `yangArbovirusSuppressionLectin2025` | 直接用，`scripts/zotero_find.py --citekey` 验证 |
 | 作者 + 年份 + 关键词 | `scripts/zotero_find.py "<query>"`，唯一命中才继续，多命中就列出来 |
 | DOI / 标题 / arXiv 号 | 同一条搜索。查不到就停，不凭记忆补元数据 |
-| 本地 PDF 路径 | 反查条目；Zotero 里没有就用文件名当临时 citekey，笔记里记 `无 Zotero 记录` |
+| 本地 PDF 路径 | 反查条目；没有记录时从原文确认书目信息，再用 `scripts/citekey.py` 生成键。归档后复用实际条目的键，笔记里的 PDF 指针指向 Zotero 附件（见第 2 步） |
 
-一个 citekey 一份笔记。没有 `citationKey`（Better BibTeX 的字段）时用 Zotero item key，并在笔记里说明。
+一个 citekey 一份笔记。复用已有 `citationKey` 或 Extra 中的 `Citation Key:`；已有笔记以 Zotero item key 为键时继续沿用，不自动迁移。只有新记录才生成机器键，补 DOI 或换版本不重算已有键。用 `zotero_find.py --citekey <key> --json` 一次取得身份、元信息、附件、标签与集合；歧义先处理，不取第一条。
 
 ## 2 定位 PDF
 
@@ -99,11 +58,30 @@ API key 可以不给：读库、裁图、写笔记都照常，只有回写 Zoter
 python scripts/zotero_find.py "author 2025 keyword"
 python scripts/zotero_find.py --citekey <citekey> --pdf
 python scripts/zotero_find.py --tags
+python scripts/zotero_find.py --citekey <citekey> --json
 ```
 
 第二种只打印绝对路径，可直接喂给 `fig.py`；第三种打印库里实际在用的标签，**建新标签前先看它**。
 
 查不到换 `--citekey` 再试，仍无则问用户要文件或 DOI，并说明搜了什么。全文没打开过，不写精读笔记。路径从 `config.local.json` 读，读不到就报错并说明要配什么。
+
+PDF 确定后先用 `python scripts/pdf_prepare.py "<PDF>"` 获取带页码的全文、图注候选和坐标缓存。重复查询与裁图复用同一 PDF 指纹的结果；缓存不代替完整阅读或看图。无文字层、部分页面无文字层、版本变化都保留在 manifest 中。命令和批量裁图见 `reference-engineering.md`。
+
+### PDF 指针怎么写
+
+笔记正文的**头部**写 PDF 指针，指向 Zotero 的 `sounding` 集合里那一条，不写散落在别处的临时路径。两条信息都要：
+
+```markdown
+本地 PDF：`D:\document\Zotero\storage\IKRKRZWG\JitRL.pdf`（Zotero 集合 `sounding` 内的附件）
+Zotero：`zotero://select/library/items/FN54EIHA`（粘进地址栏即跳到该条目）
+```
+
+- 路径来自 `zotero_find.py --citekey <citekey> --pdf`，是 Zotero 附件的真实存放位置。
+- 条目链接用 `zotero://select/library/items/<item key>`，item key 从 `zotero_find.py` 的输出取。
+- 集合名固定写 `sounding`（取自 `config.local.json` → `zotero.collection`）；条目不在这个集合里就先跑 `zotero_add.py` 并进去。
+- Notion 不接受 `file://` 协议，所以链接给 `zotero://`，不给本地路径做超链接；路径只作文字留证。
+
+入库之后再写指针：`zotero_add.py` 成功才算有 `zotero://` 那一条，指针与实际附件必须对得上。
 
 ## 3 判类型：看结构，不看发表处
 
@@ -183,7 +161,6 @@ citekey：zhangSpatialAtlas2024
 
 四样东西每个模板都有，规则写在 `reference-evidence.md`，模板只标位置与验收：
 
-- 图注与图号（照抄原文、沿用论文编号，见 `reference-evidence.md` §Figures）
 - 符号表（含义、类型、形状）
 - 损失项（在防哪种失败模式，去掉会怎样）
 - 指标（衡量什么、怎么算、盖住了什么、邻居补了什么），术语表在 `reference-metrics.md`
@@ -197,7 +174,7 @@ citekey：zhangSpatialAtlas2024
 
 1. **属于哪一波潮**，还是不属于任何潮——「无对应潮」也是结论。
 2. **在第几代**：第一代定义问题，第二代定标准，第三代合并或换载体。
-3. **哪个课题组在推**，这家在这波潮里是否连续出第二、三篇；只出现一次的不算推动者。
+3. **哪个课题组在推**——以**通讯作者 + 机构**为准，附论文给出的代码仓库；这家在这波潮里是否连续出第二、三篇；只出现一次的不算推动者。写法见 `reference-wave.md` §3。
 4. **开创了什么能力**，写成「从 X 变成 Y」，X 和 Y 都要可测；不是「性能更好」。
 
 判断要给置信度（`猜测` / `有据` / `复核`），并写清「什么证据会推翻它」。没有这一句的定位，是把印象当结论。
@@ -206,33 +183,17 @@ citekey：zhangSpatialAtlas2024
 
 ## 8 落库（幂等）
 
-顺序固定，先 Zotero 后 Notion——笔记要引用一个真实存在的 citekey。
-
-**第一步：确保 Zotero 有条目，且挂着 PDF。** 库里查不到就建，不建空笔记：
-
-```bash
-python scripts/zotero_add.py --pdf "<绝对路径>" \
-  --title "<全称>" --authors "Kaiwen Cheng;Yutian Liu" \
-  --year 2026 --venue "AAAI" --type conference \
-  --citekey chengProAR2026 --notion "<Notion URL>" \
-  --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
-```
-
-它按 citekey 与标题查重，命中就更新，不建重复条目；PDF 作为 `imported_file` 子条目上传；`Extra` 写 `Citation Key:` 与 `Notion:` 两行，这样 Better BibTeX 不会另生成一个 key；条目并入 `sounding` 集合（名字取自配置，`--no-collection` 可关）。建完再把标签与链接回写一次（`zotero_write.py`）也安全，它是合并式的。
-
-`sounding` 集合只做备份边界，不做查询主键：找论文一律按 citekey。导出它就是一次完整备份，删了重跑就重建。
-
-**第二步：按 citekey 在 `Papers` 里查。**
+先按 citekey 查 `Papers`。
 
 - 恰好一条 → **更新**该行的正文与属性，不新建。
 - 多条 → 停下报告，用户先合并。
 - 没有 → 新建一行。
 
-**第三步：把笔记正文写进 Notion 页面。** 这就是成品，不另存 markdown。
-
 同一篇读两次，库里只能有一行。字段映射、缺字段处理、标签与回写见 `reference-library.md`。
 
-两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**标签加 `p:` / `m:` / `d:` 前缀写回 Zotero**。
+两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（`Extra` 写 `Notion: <url>`，三族标签加 `p:` / `m:` / `d:` 前缀）。
+
+发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。Notion 图片上传、回读与部分失败的处理见 `reference-library.md` §6.3；长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤。记录不代替外部工具的成功响应。
 
 ## 9 停止条件
 
@@ -247,7 +208,6 @@ python scripts/zotero_add.py --pdf "<绝对路径>" \
 | 图号／表号／页码对不上 | 停。先确认是同一版本（预印本 vs 见刊） |
 | 同一篇有多个 Zotero 条目 | 停。用户先合并，否则 citekey 唯一性就破了 |
 | 映射字段在库里不存在 | 停。报缺哪个字段、对应哪个概念 |
-| 配置缺失或只是空值 | 停。按 §0 问用户，写完 `config.local.json` 再继续。不猜路径、不拿示例值硬跑 |
 
 ## 10 硬规则
 
@@ -258,78 +218,13 @@ python scripts/zotero_add.py --pdf "<绝对路径>" \
 5. **n 要说清数的是什么**，技术重复和独立实验不是一回事。
 6. **不静默丢字段。**
 
-## 11 Notion 写不进去时
+## 11 没有 Notion 工具时
 
-笔记的成品位置是 Notion 页面，不落本地 markdown。
-
-Notion 工具不可用时，才退回 `notes/<citekey>.md`（连同裁下的图），并明确告诉用户「待上传」以及卡在哪一步。退回是例外，不是并行的第二份：Notion 写成功了就不要在本地再留一份，两份必然分叉。
-
-不要因为写不进去就不产出笔记；也不要写成功之后又顺手存一份到本地。
+Notion 读写走 Notion MCP。工具不可用时，把笔记写到 `notes/<citekey>.md`，并告诉用户待上传。不要因为写不进去就不产出笔记。
 
 ## 12 课题页
 
 结构与更新规则见 `reference-topic.md`。
-
-## 13 调研：一次读一批
-
-单篇读得再好，也只是点。调研是把点连成线，并说出线往哪走。这一节是「选」与「判」两个动作的操作规程；拆与放仍走 §3–§7。
-
-### 13.1 圈定范围，先定边界再读
-
-开始之前先写下一句话：**这批论文共同回答什么问题**。写不出来就先不读，说明问题还没成形。
-
-- 一批 3–8 篇。超过 12 篇，先全部降级为扫，再从扫的结果里挑 3–5 篇精读。
-- 边界按问题定，不按期刊、不按年份。同一波潮里既有 NeurIPS 也有 Nature Methods，那是常态。
-- 三类必须包含：**最早把问题定义清楚的那篇**、**现在被当作基准的那篇**、**最近换载体的那篇**。缺第一类会误判贡献，缺第二类无法对齐数字，缺第三类看不出走向。
-
-### 13.2 先批量扫，再决定谁精读
-
-每篇先只读摘要、Figure 1、章节标题，写三行（§4 的「扫」）。三行写完再看下一个，不要中途掉进某一篇的细节。
-
-扫完一轮，从结果里挑精读，只挑三种：
-
-| 情形 | 为什么必须精读 |
-| --- | --- |
-| 它的主表是后面所有工作的参照 | 不精读，第二、三代论文的数字都没有基准 |
-| 它与你要做的判断直接冲突 | 冲突的地方就是缺口的位置，含糊过去等于放弃判断 |
-| 它的组件你要复用 | 符号表与损失项决定了你能不能正确搬走它 |
-
-其余留作背景。三行扫过的不升级，也不要「顺便」扩写——那样两头都不占。
-
-### 13.3 横向对齐：把表拉平
-
-同一张表里出现不同论文的数字时，先做三件事，再谈谁更好：
-
-1. **同指标**：名字一样但定义不同，标 `不可直接比较`，回各自原文核对口径。
-2. **同数据**：划分、预处理、评测集是否一致；不一致就分栏写，不合并。
-3. **同预算**：参数量、训练数据量、推理成本。缺这项的对比，结论只能写成「在该设置下」。
-
-对齐之后，一本书式的排序才有意义：谁在什么条件下赢、赢多少、差距是否超出方差。没有方差的数字，标 `未给置信区间`。
-
-### 13.4 收口：写成一句可测的判断
-
-调研的产物不是「读了 20 篇」，是一句话，加上它的推翻条件：
-
-```
-缺口：<现在做不到什么>
-判据：<做到什么算补上了，要可测>
-依据：<哪几篇的哪张表 / 哪个未测的设定>
-推翻：<出现什么证据，这句话就不成立>
-```
-
-- 「缺口」不能是「效果还不够好」。那是所有论文都成立的废话。
-- 「判据」要能落到一个实验或一个数字上。落不下来的，说明缺口还没看清。
-- 「依据」至少两条，来自不同论文。只有一条的依据是转述，不是调研。
-- 「推翻」写不出来，这句话不进课题页，只能留在笔记的 `待查` 里。
-
-### 13.5 调研的输出放哪
-
-- 单篇结论 → 各自笔记（Papers 库里的行）
-- 潮与代际 → `潮` 库的页面，论文行连过去
-- 缺口与判据 → 课题页（`reference-topic.md`）
-- 反向关系 → 被引的那篇补一条（`reference-library.md` §6）
-
-调研结束后，库里应当能回答三个问题：这个方向有哪几波、每波到第几代、现在缺什么。答不上来，说明还差一篇没读。
 
 ## 验收
 
@@ -338,7 +233,6 @@ Notion 工具不可用时，才退回 `notes/<citekey>.md`（连同裁下的图�
 - [ ] 速览正好 10 行，每行一句
 - [ ] 每个数字都有 `Fig.` / `Table` / `Sec.` 出处
 - [ ] 主图从 PDF 裁下，按图上布局顺序逐块解释
-- [ ] 图注与原文逐字一致，图号沿用论文编号（不是笔记里的出现顺序）
 - [ ] 符号表覆盖公式里每个符号
 - [ ] 每个损失项写出它在防的失败模式
 - [ ] 每个指标有定义、互补项、盲区

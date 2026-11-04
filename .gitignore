@@ -7,6 +7,10 @@ notes/
 *.pyc
 __pycache__/
 .venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
 
 # os
 Thumbs.db

@@ -6,15 +6,16 @@ These rules apply to every paper type. Templates reference them; they are not re
 
 ## Figures
 
-Three rules, all of them about not inventing anything:
+Four rules.
 
 1. **The caption is the paper's caption, verbatim.** Copy it from the PDF, including the `Figure N:` prefix. Undo the PDF's end-of-line hyphenation (`explic- itly` → `explicitly`, `time- coupled` → `time-coupled`) and rejoin the lines, but change no word. A caption is the authors' statement of what the figure shows; rewording it silently substitutes your reading for theirs.
 2. **The number is the paper's number.** If the first image in the note is the paper's Figure 2, it is Figure 2. Never renumber by order of appearance in the note, and never call it "图一" because it comes first there. The same applies when citing a figure in prose: use the paper's number.
-3. **Your own explanation goes elsewhere.** Reconstruct what the figure shows in the section body — block by block, in the figure's own layout order. If a Chinese gloss helps, put it on its own line marked `译：`, so the original and the gloss never mix.
+3. **Every figure gets a Chinese reading directly under the caption**, on its own line starting `中文：`. This is a reading, not a translation: say what the figure is claiming, what to look at first, and what it cannot show. The user reads this line and skips the English, so it must stand alone — no "见上文", no half sentences. Four sentences is the ceiling.
+4. **The block-by-block walkthrough still goes in the body.** The `中文：` line is the figure's argument compressed; the body is the mechanical pass — what enters, what is computed, what is handed on, how the shapes change. Keep them separate; do not let the Chinese line absorb the walkthrough, and do not repeat the Chinese line paragraph by paragraph.
 
 If the caption is too long to sit under the image, keep it whole and let the body carry the reading. Truncating is allowed only at a sentence boundary, marked with `…`, and never at the cost of dropping what the figure is for.
 
-When the source language is not English, quote the caption in the source language. Do not translate in place.
+When the source language is not English, quote the caption in the source language, and still add the `中文：` line underneath.
 
 ---
 

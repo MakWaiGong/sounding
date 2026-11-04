@@ -34,18 +34,17 @@ import hashlib
 import json
 import os
 import random
-import shutil
-import sqlite3
 import string
 import sys
-import tempfile
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import citekey as ck  # noqa: E402
+import paper_identity as identity  # noqa: E402
+from zotero_write import patch_with_retry  # noqa: E402
 
 TYPE_MAP = {
     "conference": "conferencePaper",
@@ -68,7 +67,7 @@ def request(method, url, api_key, body=None, headers=None, raw=None):
         h["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=h, method=method)
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             payload = r.read()
             return r.status, dict(r.headers), (json.loads(payload) if payload else None)
     except urllib.error.HTTPError as e:
@@ -104,33 +103,31 @@ def parse_authors(spec):
 
 
 def local_item_by_citekey(citekey, cfg):
-    """citationKey lives in itemData, so the local copy is authoritative."""
-    db = config.zotero_db(cfg)
-    if not db or not os.path.exists(db):
-        return None
-    tmp = os.path.join(tempfile.gettempdir(), "zotero_add_copy.sqlite")
-    shutil.copyfile(db, tmp)
-    c = sqlite3.connect(tmp)
-    rows = c.execute("""
-        select i.key from itemData d
-        join fieldsCombined f on d.fieldID = f.fieldID
-        join itemDataValues v on d.valueID = v.valueID
-        join items i on d.itemID = i.itemID
-        where f.fieldName = 'citationKey' and v.value = ?""", (citekey,)).fetchall()
-    c.close()
-    return rows[0][0] if rows else None
+    item = identity.lookup_local(config.zotero_db(cfg), citekey)
+    return item["item_key"] if item else None
+
+
+def list_api(path, base, user_id, api_key, **params):
+    """Read all pages before deciding whether an identity/collection is unique."""
+    start = 0
+    while True:
+        q = urllib.parse.urlencode(dict(params, limit=100, start=start))
+        status, _, data = request("GET", f"{base}/users/{user_id}/{path}?{q}", api_key)
+        if status != 200 or not isinstance(data, list):
+            raise RuntimeError(f"could not list {path}: HTTP {status} {data}")
+        yield from data
+        if len(data) < 100:
+            return
+        start += len(data)
 
 
 def api_item_by_title(title, base, user_id, api_key):
-    q = urllib.parse.urlencode({"q": title, "qmode": "titleCreatorYear", "limit": 25})
-    status, _, data = request("GET", f"{base}/users/{user_id}/items?{q}", api_key)
-    if status != 200 or not isinstance(data, list):
-        return None
     want = normalise(title)
-    for item in data:
-        if normalise(item.get("data", {}).get("title")) == want:
-            return item.get("key"), item.get("data", {})
-    return None
+    matches = [item for item in list_api("items/top", base, user_id, api_key,
+                                       q=title, qmode="titleCreatorYear")
+               if normalise(item.get("data", {}).get("title")) == want]
+    item = identity.unique_item(matches, "title")
+    return (item["key"], item["data"]) if item else None
 
 
 def md5_of(path):
@@ -150,7 +147,7 @@ def build_item(a, tags, extra):
         "date": str(a.year),
         "tags": [{"tag": t.strip()} for t in tags if t.strip()],
         "extra": extra,
-        "language": a.language,
+        "language": a.language or "en",
         "url": a.url or "",
         "DOI": a.doi or "",
         "abstractNote": a.abstract or "",
@@ -175,6 +172,46 @@ def build_item(a, tags, extra):
     return data
 
 
+def choose_citekey(item, requested, fallback):
+    """Existing keys are permanent. Renaming requires an explicit migration."""
+    current = identity.existing_citekey(item.get("data", {}))
+    if current and fallback and current != fallback:
+        raise identity.IdentityError(f"citation key changed from {fallback!r} to {current!r}; resolve identity before writing")
+    current = current or fallback
+    if current and requested and current != requested:
+        raise identity.IdentityError(f"existing citekey {current!r} differs from {requested!r}; keep the existing key")
+    return current or requested or item.get("key")
+
+
+def update_patch(item, a, prefixes, fallback_key=None):
+    current = item["data"]
+    current_key = identity.existing_citekey(current)
+    key = choose_citekey(item, a.citekey, fallback_key)
+    if a.doi and current.get("DOI") and identity.normalize_doi(a.doi) != identity.normalize_doi(current["DOI"]):
+        raise identity.IdentityError("the matched item has a different DOI; disambiguate before writing")
+    patch = {"title": a.title, "date": str(a.year)}
+    # Preserve byte-for-byte Extra when no managed line needs changing. This
+    # avoids a no-op PATCH caused only by moving Citation Key to the last line.
+    if a.notion is not None or current_key is None:
+        patch["extra"] = identity.merge_extra(
+            current.get("extra"), citekey=key if current_key is None else None,
+            notion=a.notion)
+    venue_field = {"conferencePaper": "proceedingsTitle", "journalArticle": "publicationTitle"}.get(
+        current.get("itemType"), "publisher")
+    patch[venue_field] = a.venue
+    for attr, field in (("language", "language"), ("url", "url"), ("doi", "DOI"),
+                        ("abstract", "abstractNote"), ("conference_name", "conferenceName"),
+                        ("place", "place"), ("publisher", "publisher"),
+                        ("volume", "volume"), ("pages", "pages")):
+        value = getattr(a, attr)
+        if value is not None:
+            patch[field] = identity.normalize_doi(value) if attr == "doi" else value
+    if a.tags is not None:
+        patch["tags"] = identity.merge_tags(current.get("tags"),
+            [t.strip() for t in a.tags.split(",") if t.strip()], prefixes)
+    return {k: v for k, v in patch.items() if current.get(k) != v}
+
+
 def upload_file(base, user_id, api_key, attachment_key, pdf):
     """Authorize, POST the bytes to storage, then register. Zotero API v3."""
     st = os.stat(pdf)
@@ -194,13 +231,12 @@ def upload_file(base, user_id, api_key, attachment_key, pdf):
         return True, "file already on server, linked"
 
     # prefix and suffix are literal multipart text: the file goes between them.
-    body = (auth["prefix"].encode("utf-8")
-            + open(pdf, "rb").read()
-            + auth["suffix"].encode("utf-8"))
+    with open(pdf, "rb") as stream:
+        body = auth["prefix"].encode("utf-8") + stream.read() + auth["suffix"].encode("utf-8")
     req = urllib.request.Request(auth["url"], data=body, method="POST",
                                  headers={"Content-Type": auth["contentType"]})
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             if r.status not in (200, 201, 204):
                 return False, f"upload failed: HTTP {r.status}"
     except urllib.error.HTTPError as e:
@@ -249,11 +285,13 @@ def file_present(base, user_id, key, api_key):
     req = urllib.request.Request(url, headers={"Zotero-API-Key": api_key,
                                                "Zotero-API-Version": "3"})
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=30) as r:
             r.read(64)  # enough to prove the response opens; do not pull the whole PDF
             return r.status == 200
-    except urllib.error.HTTPError:
-        return False
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise RuntimeError(f"could not check attachment {key}: HTTP {e.code}") from e
 
 
 def resolve_collection(base, user_id, api_key, name, create=True):
@@ -263,14 +301,11 @@ def resolve_collection(base, user_id, api_key, name, create=True):
     skill maintains in Zotero. It is a projection, never a lookup key: items are
     found by citekey, so deleting the collection costs nothing but a rebuild.
     """
-    status, _, data = request("GET", f"{base}/users/{user_id}/collections?limit=100",
-                              api_key)
-    if status != 200 or not isinstance(data, list):
-        return None, f"could not list collections: HTTP {status} {data}"
-    for c in data:
-        d = c.get("data", {})
-        if d.get("name") == name and not d.get("parentCollection"):
-            return d.get("key"), None
+    matches = [c for c in list_api("collections", base, user_id, api_key)
+               if c.get("data", {}).get("name") == name and not c["data"].get("parentCollection")]
+    current = identity.unique_item(matches, f"collection {name!r}")
+    if current:
+        return current.get("key") or current["data"].get("key"), None
     if not create:
         return None, f"collection {name!r} not found"
     status, _, resp = request("POST", f"{base}/users/{user_id}/collections", api_key,
@@ -289,17 +324,10 @@ def resolve_collection(base, user_id, api_key, name, create=True):
 def ensure_in_collection(base, user_id, api_key, item_key, collection_key):
     """Union membership. A PATCH with `collections` replaces the list, so the
     item's other collections must be read first and carried over."""
-    status, _, cur = request("GET", f"{base}/users/{user_id}/items/{item_key}", api_key)
-    if status != 200 or not isinstance(cur, dict):
-        return f"could not read item {item_key}: HTTP {status} {cur}"
-    have = list(cur.get("data", {}).get("collections") or [])
-    if collection_key in have:
-        return None
-    status, _, resp = request("PATCH", f"{base}/users/{user_id}/items/{item_key}", api_key,
-                              {"collections": have + [collection_key]},
-                              {"If-Unmodified-Since-Version": str(cur.get("version", 0))})
-    if status not in (200, 204):
-        return f"could not add {item_key} to collection: HTTP {status} {resp}"
+    def make_patch(item):
+        have = list(item["data"].get("collections") or [])
+        return {} if collection_key in have else {"collections": have + [collection_key]}
+    patch_with_retry(request, f"{base}/users/{user_id}/items/{item_key}", api_key, make_patch)
     return None
 
 
@@ -314,9 +342,10 @@ def main():
                     choices=["conference", "journal", "review", "other"],
                     help="mirrors the Notion 类型 value")
     ap.add_argument("--item-type", help="override the Zotero itemType")
-    ap.add_argument("--citekey", required=True)
+    ap.add_argument("--citekey",
+                    help="machine key; derived from DOI or title when omitted")
     ap.add_argument("--notion", help="Notion page URL to record in Extra")
-    ap.add_argument("--tags", default="", help="comma separated, family prefixed")
+    ap.add_argument("--tags", help="comma separated, family prefixed; omitted preserves all tags")
     ap.add_argument("--conference-name")
     ap.add_argument("--place")
     ap.add_argument("--publisher")
@@ -325,7 +354,7 @@ def main():
     ap.add_argument("--doi")
     ap.add_argument("--url")
     ap.add_argument("--abstract")
-    ap.add_argument("--language", default="en")
+    ap.add_argument("--language", help="new items default to en; omitted preserves existing language")
     ap.add_argument("--collection", help="collection name; defaults to zotero.collection")
     ap.add_argument("--no-collection", action="store_true",
                     help="do not file the item into the skill's collection")
@@ -342,64 +371,57 @@ def main():
         sys.exit("set zotero.user_id and zotero.api_key in config.local.json "
                  "(create a key at https://www.zotero.org/settings/keys)")
 
-    tags = [t.strip() for t in a.tags.split(",") if t.strip()]
-    extra_lines = [f"Citation Key: {a.citekey}"]
-    if a.notion:
-        extra_lines.append(f"Notion: {a.notion}")
-    extra = "\n".join(extra_lines) + "\n"
-
-    # The collection is resolved before anything is written: a typo in the name
-    # should fail here, not leave a pile of items filed nowhere.
-    collection_key = None
-    if not a.no_collection:
-        cname = a.collection or config.zotero_collection(cfg)
-        if cname:
-            collection_key, err = resolve_collection(base, user_id, api_key, cname)
-            if err:
-                sys.exit(err)
-            a.collection = collection_key
-    data = build_item(a, tags, extra)
-
+    if a.doi:
+        a.doi = identity.normalize_doi(a.doi)
+        if not a.doi:
+            sys.exit("invalid DOI; use a bare DOI or a doi.org URL")
+    derived = ck.derive(a.doi, a.title, a.authors, a.year)
+    local = identity.lookup_local(config.zotero_db(cfg), a.item_key, a.citekey, a.doi, derived)
+    if a.item_key and local and local["item_key"] != a.item_key:
+        raise identity.IdentityError("--item-key and the supplied DOI/citekey resolve to different items")
+    local_key = identity.existing_citekey(local["fields"]) if local else None
+    key = a.item_key or (local["item_key"] if local else None)
+    if not key:
+        hit = api_item_by_title(a.title, base, user_id, api_key)
+        key = hit[0] if hit else None
+        # A server title hit may have a local Better BibTeX key not yet in Extra.
+        if key:
+            local = identity.lookup_local(config.zotero_db(cfg), key)
+            local_key = identity.existing_citekey(local["fields"]) if local else None
+    current = None
+    if key:
+        status, _, current = request("GET", f"{base}/users/{user_id}/items/{key}", api_key)
+        if status != 200 or not isinstance(current, dict) or "data" not in current:
+            sys.exit(f"could not read item {key}: HTTP {status} {current}")
+        resolved_key = choose_citekey(current, a.citekey, local_key)
+    else:
+        resolved_key = a.citekey or derived
+    print(f"citekey: {resolved_key} ({'existing' if key else 'new'})")
+    cname = None if a.no_collection else (a.collection or config.zotero_collection(cfg))
+    a.collection = None  # build_item accepts resolved collection keys only
+    tags = [t.strip() for t in (a.tags or "").split(",") if t.strip()]
+    data = build_item(a, tags, identity.merge_extra("", citekey=resolved_key, notion=a.notion))
+    make_patch = lambda item: update_patch(item, a, config.tag_prefixes(cfg), resolved_key)
+    preview = make_patch(current) if current else data
     if a.dry_run:
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-        print(f"attachment: {a.pdf}")
+        print(json.dumps({"operation": "update" if key else "create", "item_key": key,
+                          "citekey": resolved_key, "payload": preview,
+                          "collection": cname, "attachment": a.pdf}, ensure_ascii=False, indent=2))
         return
 
-    # 1. already there?
-    key = a.item_key
-    if not key:
-        key = local_item_by_citekey(a.citekey, cfg)
-        if key:
-            print(f"found by citekey in the local library: {key} (updating)")
-        else:
-            hit = api_item_by_title(a.title, base, user_id, api_key)
-            if hit:
-                key, old = hit
-                print(f"found by title on the server: {key} (updating)")
-                # keep whatever the user already typed into Extra
-                keep = [l for l in old.get("extra", "").splitlines()
-                        if l.strip() and not l.lower().startswith(("citation key:", "notion:"))]
-                data["extra"] = "\n".join(keep + extra_lines) + "\n"
-
+    # Identity and patch validation happen before creating any collection/item.
+    collection_key = None
+    if cname:
+        collection_key, err = resolve_collection(base, user_id, api_key, cname)
+        if err:
+            sys.exit(err)
     created = None
     if key:
-        # update path: patch the descriptive fields, leave creators alone
-        st, _, cur = request("GET", f"{base}/users/{user_id}/items/{key}", api_key)
-        if st != 200 or not isinstance(cur, dict):
-            sys.exit(f"could not read item {key}: HTTP {st} {cur}")
-        patch = {k: v for k, v in data.items()
-                 if k not in ("creators", "itemType", "collections")}
-        # keep anything the user wrote into Extra; replace only our two lines
-        keep = [l for l in cur.get("data", {}).get("extra", "").splitlines()
-                if l.strip() and not l.lower().startswith(("citation key:", "notion:"))]
-        patch["extra"] = "\n".join(keep + extra_lines) + "\n"
-        status, _, resp = request("PATCH", f"{base}/users/{user_id}/items/{key}",
-                                  api_key, patch,
-                                  {"If-Unmodified-Since-Version": str(cur.get("version", 0))})
-        if status not in (200, 204):
-            sys.exit(f"update failed for {key}: HTTP {status} {resp}")
+        patch_with_retry(request, f"{base}/users/{user_id}/items/{key}", api_key, make_patch, current)
         print(f"updated item {key}")
     else:
+        if collection_key:
+            data["collections"] = [collection_key]
         status, _, resp = request("POST", f"{base}/users/{user_id}/items", api_key,
                                   [data], {"Zotero-Write-Token": write_token()})
         if status != 200:
@@ -411,20 +433,18 @@ def main():
         created = key
         print(f"created item {key}")
 
-    # 2. make sure it is filed in the skill's collection (create path already
-    #    set it; the update path excluded `collections` from the patch on purpose)
-    if collection_key:
+    # Update path preserves other collections; creation already set membership.
+    if collection_key and not created:
         err = ensure_in_collection(base, user_id, api_key, key, collection_key)
         if err:
             sys.exit(err)
         print(f"collection: {key} is in {collection_key}")
 
     # 3. attach the PDF, unless this item already has a working file attachment
-    status, _, children = request("GET", f"{base}/users/{user_id}/items/{key}/children",
-                                  api_key)
-    kids = children if isinstance(children, list) else []
+    kids = list(list_api(f"items/{key}/children", base, user_id, api_key))
     has_file = any(
         c.get("data", {}).get("itemType") == "attachment"
+        and c.get("data", {}).get("contentType") == "application/pdf"
         and c.get("data", {}).get("linkMode") in ("imported_file", "imported_url")
         and c.get("data", {}).get("md5")
         and file_present(base, user_id, c.get("key"), api_key)
@@ -437,11 +457,14 @@ def main():
         for c in kids:
             d = c.get("data", {})
             if (d.get("itemType") == "attachment"
+                    and d.get("contentType") == "application/pdf"
                     and d.get("linkMode") in ("imported_file", "imported_url")
                     and not (d.get("md5") and file_present(base, user_id, c.get("key"), api_key))):
                 st, _, _ = request("DELETE",
                                    f"{base}/users/{user_id}/items/{c.get('key')}", api_key,
                                    headers={"If-Unmodified-Since-Version": str(c.get("version", 0))})
+                if st not in (200, 204):
+                    sys.exit(f"could not remove empty attachment {c.get('key')}: HTTP {st}")
                 print(f"pdf: removed empty attachment {c.get('key')} (HTTP {st})")
 
         akey, err = attach_pdf(base, user_id, api_key, key, a.pdf, api_key, "Full Text PDF")
@@ -453,9 +476,12 @@ def main():
         if not ok:
             sys.exit(f"attachment {akey} is empty on the server; retry with --item-key {key}")
 
-    print(json.dumps({"citekey": a.citekey, "item_key": key,
+    print(json.dumps({"citekey": resolved_key, "item_key": key,
                       "created": bool(created)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as e:
+        sys.exit(str(e))

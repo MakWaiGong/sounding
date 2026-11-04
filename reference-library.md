@@ -12,9 +12,10 @@
 
 ```bash
 python scripts/check_config.py
+python scripts/check_config.py --schema-json notes/schema.json
 ```
 
-它检查三件事：配置项是否齐、映射字段在库里是否存在、select 的合法值是否一致。任何一项报错，先修配置或库，不要开始写笔记。
+第一条离线检查映射配置，不要求 Notion token，也不宣称检查过真实库。第二条检查从 MCP 获取并整理成 `{"properties": {"真实字段名": {"type": "rich_text"}}}` 格式的 schema JSON，包括字段类型和 select 合法值。保留实际 `select.options`，不要从配置反造 schema。任何一项报错，先修配置或库。直接调用旧版 Notion database API 的检查需显式加 `--online`，并设置 `NOTION_TOKEN`。
 
 运行期再确认一次：写之前 `fetch` 一次 `Papers` 的 schema，拿到当前真实字段列表。**配置文件是缓存，schema 才是事实。**
 
@@ -32,7 +33,7 @@ python scripts/check_config.py
 | `venue` | 发表 | text | `Nature Methods`、`NeurIPS`，**不带年份** |
 | `year` | 年份 | number | 四位数字 |
 | `type` | 类型 | select | `conference` / `journal` / `review` / `other` |
-| `citekey` | citekey | text | Zotero citationKey |
+| `citekey` | citekey | text | 机器键：`sha1` 前 10 位 |
 | `read_level` | 读法 | select | `扫` / `精读` |
 | `problem` | 问题域 | multi_select | 见 `reference-tags.md` |
 | `method` | 方法族 | multi_select | 同上 |
@@ -94,6 +95,10 @@ python scripts/check_config.py
 
 按 `citekey` 精确查，不要用标题模糊搜（同一篇的预印本与见刊版标题常常不同）。
 
+citekey 用来标识论文。新记录由 `scripts/citekey.py` 对规范化 DOI，或标题、一作姓、年份计算机器键，取 SHA-1 前 10 位；不要在别处重写算法。已有条目先沿用 `citationKey` 或 Extra 的 `Citation Key:`；已有笔记用 item key 时继续沿用。`zotero_add.py` 未传 `--citekey` 时优先保留找到的旧键，仅在新记录上生成键。补 DOI、改标题、重建附件不自动改已有键。
+
+`paper_identity.py` 统一解析这些身份别名，按 DOI 比较时保留 DOI 中有意义的标点。多个条目命中同一身份即报歧义；旧字段与 Extra 冲突时也不任选一个。Notion 仍按最终采用的 citekey 精确查重，不用标题猜更新目标。
+
 | 命中 | 动作 |
 | --- | --- |
 | 1 条 | 更新正文与属性。**不新建。** |
@@ -138,19 +143,23 @@ Notion 是主库，Zotero 只承担"存 PDF 与书目信息"的角色。所以�
 
 `zotero_write.py` / `zotero_add.py` 都只做并集：读取现有 `collections` 再追加，绝不覆盖——写入 `collections` 字段是整表替换，漏读就会把条目从其它集合里踢出去。
 
+**笔记里的 PDF 指针指向这个集合。** 正文头部写两条：`本地 PDF：<Zotero 附件的绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写散落在阅读文件夹里的临时路径——那个路径下次就不在了，而 `sounding` 里的附件才是这份 skill 维护的那一份。
+
 ### 6.1 条目不存在时：建条目并挂 PDF
 
 ```bash
 python scripts/zotero_add.py --pdf "<绝对路径>" \
   --title "<论文全称>" --authors "First Last;First Last" \
   --year 2026 --venue "AAAI" --type conference \
-  --citekey chengProAR2026 --notion "<Notion URL>" \
+  --notion "<Notion URL>" \
   --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
 ```
 
+`--citekey` 省略时脚本优先保留既有键，仅新记录自动计算机器键；已有 Notion 记录时应传其采用的键以核对一致性。
+
 - `--type` 与笔记里的 `类型` 一致，脚本据此选 Zotero 的 itemType（conference → `conferencePaper`，journal/review → `journalArticle`，other → `document`）。
 - `--venue` 只放刊名／会议名，不带年份，与 Notion 的 `发表` 字段同值。
-- 查重两条路：本地库的 `citationKey`，以及服务端按标题精确匹配。命中就更新该条目，不建重复。
+- 本地身份解析与服务端查重都拒绝多命中；优先用 DOI 等强标识核对。唯一匹配才更新，保留未提供的元数据和手写标签。
 - PDF 作为 `imported_file` 子条目上传。上传成功后才回填 `md5`／`mtime`；如果中途失败，脚本会删掉留下的空附件再重试，不会积累一堆无文件的条目。
 - `Extra` 自动写入两行：`Citation Key: <key>` 与 `Notion: <url>`。写 `Citation Key` 是为了让 Better BibTeX 不再自己生成一个不同的 key，否则同一篇会有两个 citekey。
 
@@ -180,6 +189,19 @@ python scripts/zotero_write.py --citekey <citekey> \
 失败就报错，不要静默跳过：告诉用户哪一步失败、条目 key 是什么；笔记本身照常产出。
 
 **不会做的事**：不下载付费墙后的 PDF、不在 PDF 上画批注。批注（annotation）是本地表里的对象，Web API 没有对应端点；能在 API 层写的只有笔记（note）。
+
+---
+
+### 6.3 Notion 图像与完成状态
+
+正文仍由 Notion MCP 写入。首次发布时先检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
+
+1. 把已核对的裁图通过工具支持的上传方式上传，或使用用户已有的可访问托管地址。记录每张图的源 PDF 指纹、页码、裁图哈希和上传返回的标识；批量裁图清单可提供这些来源信息。
+2. 按正文位置插入图片并写属性。回读同一页面，核对 citekey、正文和图片块/文件引用；工具能预览时检查图像可见。
+3. 工具不支持上传、上传失败或只能核对块而不能确认图像时，明确记录缺失项。笔记可先保存，图片保持待完成，不宣称整篇已发布完成。不要为绕过上传而公开私人 PDF 或图片。
+4. 记录 Notion page ID 后再回写 Zotero。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
+
+`run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。
 
 ---
 

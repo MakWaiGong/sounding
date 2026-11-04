@@ -6,25 +6,21 @@
   python zotero_find.py --list-collections
   python zotero_find.py --tags                 # tag vocabulary actually in use
 
-Reads a copy of zotero.sqlite, so it works while Zotero is running.
+Reads a consistent in-memory SQLite snapshot, including committed WAL data.
 """
 import argparse
+from contextlib import closing
+import json
 import os
-import shutil
-import sqlite3
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
+import paper_identity as identity  # noqa: E402
 
 
 def connect(db):
-    if not os.path.exists(db):
-        sys.exit(f"zotero database not found: {db}")
-    tmp = os.path.join(tempfile.gettempdir(), "zotero_find_copy.sqlite")
-    shutil.copyfile(db, tmp)
-    return sqlite3.connect(tmp)
+    return identity.snapshot(db)
 
 
 def rows(c, sql, args=()):
@@ -44,7 +40,7 @@ def creators_of(c, item_id):
         select c.lastName, c.firstName, ic.orderIndex from itemCreators ic
         join creators c on ic.creatorID = c.creatorID
         where ic.itemID = ? order by ic.orderIndex""", (item_id,))
-    return [f"{a} {b}".strip() for a, b, _ in out]
+    return [f"{b} {a}".strip() for a, b, _ in out]
 
 
 def attachments_of(c, item_id, data_dir):
@@ -52,7 +48,8 @@ def attachments_of(c, item_id, data_dir):
     for path, item_key, link_mode in rows(c, """
             select ia.path, i.key, ia.linkMode from itemAttachments ia
             join items i on ia.itemID = i.itemID
-            where ia.parentItemID = ?""", (item_id,)):
+            where ia.parentItemID = ?
+              and i.itemID not in (select itemID from deletedItems)""", (item_id,)):
         if not path:
             continue
         if path.startswith("storage:"):
@@ -78,8 +75,8 @@ def tags_of(c, item_id):
         where it.itemID = ?""", (item_id,))]
 
 
-def search(c, query, limit):
-    """Every term must match somewhere: title, citekey, author or tag."""
+def search(c, query, limit=None):
+    """Every term must match a bibliographic field, author, item key or tag."""
     terms = [t for t in query.split() if t]
     if not terms:
         return []
@@ -87,39 +84,59 @@ def search(c, query, limit):
                           join fieldsCombined f on d.fieldID = f.fieldID
                           join itemDataValues v on d.valueID = v.valueID
                         where d.itemID = i.itemID
-                          and f.fieldName in ('title', 'citationKey')
+                          and f.fieldName in ('title', 'citationKey', 'DOI', 'date', 'extra')
                           and v.value like ?)
                 or exists (select 1 from itemCreators ic
                              join creators cr on ic.creatorID = cr.creatorID
-                          where ic.itemID = i.itemID and cr.lastName like ?)
+                          where ic.itemID = i.itemID and (cr.lastName || ' ' || cr.firstName) like ?)
                 or exists (select 1 from itemTags it
                              join tags t on it.tagID = t.tagID
-                          where it.itemID = i.itemID and t.name like ?))"""
+                          where it.itemID = i.itemID and t.name like ?)
+                or i.key = ?)"""
     cond = " and ".join([block] * len(terms))
     args = []
     for t in terms:
-        args.extend([f"%{t}%"] * 3)
-    args.append(limit)
-    return rows(c, f"""
+        args.extend([f"%{t}%"] * 3 + [t])
+    result = rows(c, f"""
         select i.itemID from items i
         where i.itemID not in (select itemID from deletedItems)
           and i.itemID not in (select itemID from itemAttachments)
+          and i.itemID not in (select itemID from itemNotes)
           and {cond}
-        order by i.itemID desc limit ?""", tuple(args))
+        order by i.itemID desc""", tuple(args))
+    return result if limit is None else result[:limit]
 
 
 def by_citekey(c, key):
-    return rows(c, """
-        select d.itemID from itemData d
-        join fieldsCombined f on d.fieldID = f.fieldID
-        join itemDataValues v on d.valueID = v.valueID
-        where f.fieldName = 'citationKey' and v.value = ?""", (key,))
+    return [(r["item_id"],) for r in identity.resolve_items(c, key)]
+
+
+def item_json(c, item_id, data_dir):
+    fields = fields_of(c, item_id)
+    key = rows(c, "select key from items where itemID = ?", (item_id,))[0][0]
+    record = {"item_id": item_id, "item_key": key, "metadata": fields,
+              "authors": creators_of(c, item_id),
+              "collections": collections_of(c, item_id), "tags": tags_of(c, item_id),
+              "attachments": [{"path": p, "exists": os.path.exists(p),
+                               "is_pdf": p.lower().endswith(".pdf")}
+                              for p in attachments_of(c, item_id, data_dir)],
+              "doi": identity.normalize_doi(fields.get("DOI")) or None}
+    try:
+        record["citekey"] = identity.existing_citekey(fields) or key
+    except identity.IdentityError as e:
+        record["citekey"] = None
+        record["identity_error"] = str(e)
+    return record
 
 
 def show(c, item_id, data_dir):
     f = fields_of(c, item_id)
     key = rows(c, "select key from items where itemID = ?", (item_id,))[0][0]
-    print(f"citekey : {f.get('citationKey', '(none)')}")
+    try:
+        citekey = identity.existing_citekey(f) or key
+    except identity.IdentityError as e:
+        citekey = f"[conflict: {e}]"
+    print(f"citekey : {citekey}")
     print(f"zotero  : {key}")
     print(f"title   : {f.get('title', '(none)')}")
     print(f"authors : {', '.join(creators_of(c, item_id)) or '(none)'}")
@@ -145,10 +162,15 @@ def main():
     ap.add_argument("--db", default=None)
     ap.add_argument("--data-dir", default=None)
     ap.add_argument("--pdf", action="store_true")
+    ap.add_argument("--json", action="store_true", help="one structured result, with match count")
     ap.add_argument("--limit", type=int, default=8)
     ap.add_argument("--list-collections", action="store_true")
     ap.add_argument("--tags", action="store_true")
     a = ap.parse_args()
+    if a.limit < 1:
+        ap.error("--limit must be positive")
+    if a.json and a.pdf:
+        ap.error("choose --json or --pdf")
 
     try:
         sys.stdout.reconfigure(errors="replace")
@@ -167,43 +189,71 @@ def main():
         sys.exit("no Zotero data directory configured: set zotero.data_dir in config.local.json "
                  "or the ZOTERO_DATA_DIR environment variable")
 
-    c = connect(a.db)
+    try:
+        with closing(connect(a.db)) as c:
+            run(c, a)
+    except (OSError, identity.IdentityError) as e:
+        sys.exit(str(e))
+
+
+def run(c, a):
 
     if a.list_collections:
-        for name, n in rows(c, """
+        values = rows(c, """
                 select col.collectionName, count(ci.itemID) from collections col
                 left join collectionItems ci on ci.collectionID = col.collectionID
-                group by col.collectionID order by 2 desc"""):
+                group by col.collectionID order by 2 desc""")
+        if a.json:
+            print(json.dumps({"collections": [{"name": name, "count": n} for name, n in values]}, ensure_ascii=False))
+            return
+        for name, n in values:
             print(f"{n:4d}  {name}")
         return
 
     if a.tags:
-        for name, n in rows(c, """
+        values = rows(c, """
                 select t.name, count(it.itemID) from tags t
                 join itemTags it on it.tagID = t.tagID
-                group by t.tagID order by 2 desc limit 60"""):
+                group by t.tagID order by 2 desc limit 60""")
+        if a.json:
+            print(json.dumps({"tags": [{"name": name, "count": n} for name, n in values]}, ensure_ascii=False))
+            return
+        for name, n in values:
             print(f"{n:4d}  {name}")
         return
 
     if a.citekey:
         ids = [r[0] for r in by_citekey(c, a.citekey)]
     elif a.query:
-        ids = [r[0] for r in search(c, " ".join(a.query), a.limit)]
+        query = " ".join(a.query)
+        exact = identity.resolve_items(c, query)
+        ids = [r["item_id"] for r in exact] if exact else [r[0] for r in search(c, query)]
     else:
         sys.exit("give a query, --citekey, --tags or --list-collections")
 
+    count = len(ids)
+    if a.json:
+        print(json.dumps({"status": "none" if count == 0 else "unique" if count == 1 else "multiple",
+                          "match_count": count, "truncated": count > a.limit,
+                          "matches": [item_json(c, i, a.data_dir) for i in ids[:a.limit]]},
+                         ensure_ascii=False, indent=2))
+        return
     if not ids:
         print("no match")
         return
 
     if a.pdf:
+        if count > 1:
+            sys.exit(f"{count} matching items; disambiguate with --json before requesting a PDF")
         for item_id in ids:
             for p in attachments_of(c, item_id, a.data_dir):
                 if p.lower().endswith(".pdf") and os.path.exists(p):
                     print(p)
         return
 
-    for item_id in ids:
+    if count > 1:
+        print(f"{count} matches; showing {min(count, a.limit)} (choose one before writing)")
+    for item_id in ids[:a.limit]:
         show(c, item_id, a.data_dir)
         print()
 

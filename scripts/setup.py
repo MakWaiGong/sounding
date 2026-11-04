@@ -12,10 +12,7 @@ import argparse
 import json
 import os
 import re
-import shutil
-import sqlite3
 import sys
-import tempfile
 import urllib.error
 import urllib.request
 
@@ -48,16 +45,15 @@ def find_zotero_db():
 
 
 def inspect_db(path):
-    """(ok, message) -- copy first, Zotero may hold a lock."""
+    """(ok, message) using the shared read-only consistent snapshot."""
     if not os.path.exists(path):
         return False, "file does not exist"
-    tmp = os.path.join(tempfile.gettempdir(), "sounding_setup_copy.sqlite")
     try:
-        shutil.copyfile(path, tmp)
-        c = sqlite3.connect(tmp)
-        n = c.execute("select count(*) from items").fetchone()[0]
-        tables = {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
-        c.close()
+        from contextlib import closing
+        from paper_identity import snapshot
+        with closing(snapshot(path)) as c:
+            n = c.execute("select count(*) from items").fetchone()[0]
+            tables = {r[0] for r in c.execute("select name from sqlite_master where type='table'")}
     except Exception as e:
         return False, f"not a readable Zotero database ({e})"
     if "itemData" not in tables:
@@ -115,11 +111,11 @@ def main():
     base = {}
     if os.path.exists(config.EXAMPLE):
         with open(config.EXAMPLE, encoding="utf-8") as f:
-            base.update(json.load(f))
+            base = config.deep_merge(base, json.load(f))
     local_exists = os.path.exists(cfg_path)
     if local_exists:
         with open(cfg_path, encoding="utf-8") as f:
-            base.update(json.load(f))
+            base = config.deep_merge(base, json.load(f))
 
     z = base.setdefault("zotero", {})
     n = base.setdefault("notion", {})
@@ -197,6 +193,7 @@ def main():
         n["papers_data_source_id"] = a.notion_ds
 
     # --- write -----------------------------------------------------------
+    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(base, f, ensure_ascii=False, indent=2)
         f.write("\n")

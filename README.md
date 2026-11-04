@@ -20,15 +20,15 @@
 
 单篇读完产出一份笔记，一批读完产出三样东西：
 
-- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、四种骨架之一（按论文结构选：conference 四段式 / journal 三段式 / other 通用式 / scan 三行）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
-- **位置** —— 这篇在潮图上的哪一格：潮、世代、课题组、开创了什么、置信度与推翻条件
+- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、四种骨架之一（按论文结构选：conference 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / journal 三段式 / other 通用式 / scan 三行）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
+- **位置** —— 这篇在潮图上的哪一格：潮、世代、课题组（以通讯作者 + 机构 + 代码仓库为准）、开创了什么、置信度与推翻条件
 - **判断** —— 这个方向缺什么，判据是什么，什么证据会推翻它
 
 四条贯穿全篇的规则：
 
 - **复述，不评判。** 覆盖度的事实照记（`原文未报告`、`未给置信区间`），价值判断不写。
 - **每个数字带出处。** 后面跟 `Fig. 3` / `Table 2` / `Sec. 4.2`。
-- **图裁不画，图注照抄。** 裁原 PDF，不重画、不叠标注。图注逐字取原文，图号沿用论文编号——笔记里第一张图也可能是 Figure 2。自己的解读放正文，不放图注；表格重打成 markdown。
+- **图裁不画，图注照抄，下面带一行中文。** 裁原 PDF，不重画、不叠标注。图注逐字取原文，图号沿用论文编号——笔记里第一张图也可能是 Figure 2。图注下另起一行 `中文：`，写这张图怎么看而不是直译；逐块重建放正文；表格重打成 markdown。
 - **判断要可被推翻。** 写不出「什么证据会推翻它」的，是印象，不是判断。
 
 ## 脚本
@@ -36,11 +36,16 @@
 | 脚本 | 做什么 |
 | --- | --- |
 | `scripts/setup.py` | 首次配置：探测 Zotero 路径、写 key、认 Notion 库 |
-| `scripts/check_config.py` | 体检：配置项、字段映射、select 合法值 |
-| `scripts/zotero_find.py` | 查库：按作者／标题／citekey 找，打印 PDF 路径与在用标签 |
+| `scripts/check_config.py` | 离线体检，或对 MCP 导出的 schema 校验字段类型和 select 值 |
+| `scripts/citekey.py` | 为新记录计算机器键，旧键保持不变 |
+| `scripts/paper_identity.py` | 共用身份解析、DOI 别名与只读 SQLite 一致性快照 |
+| `scripts/zotero_find.py` | 查作者／标题／年份／DOI／citekey，支持 JSON 一次返回元信息和附件 |
 | `scripts/zotero_add.py` | 建条目、上传 PDF、并入 `sounding` 集合，写 `Citation Key` 与 `Notion` 到 Extra |
 | `scripts/zotero_write.py` | 回写三族标签与 Notion 链接，合并式，不动手写标签 |
-| `scripts/fig.py` | 扫图注、裁图、渲染页面 |
+| `scripts/pdf_prepare.py` | 按 PDF 指纹缓存逐页原文、图注候选和坐标，支持检索 |
+| `scripts/fig.py` | 扫图注、裁图、渲染页面，支持 JSON 清单批量裁图 |
+| `scripts/validate_note.py` | 检查笔记结构、图片路径与来源定位；不代替语义核对 |
+| `scripts/run_state.py` | 记录实际完成步骤和待办，识别源文件/笔记变化 |
 
 ## 安装
 
@@ -67,13 +72,15 @@ ln -s /path/to/sounding ~/.claude/skills/sounding
 mklink /J "%USERPROFILE%\.cursor\skills\sounding" "D:\code\sounding"
 ```
 
-裁图脚本需要 Python 3 + `pymupdf`：
+脚本需要 Python 3.10+，在仓库目录安装依赖：
 
 ```bash
-pip install pymupdf
+python -m pip install -e .
 ```
 
 文档里的 `python` 在 macOS / Linux 上通常是 `python3`。
+
+安装只准备 Python 依赖；skill 仍从这个目录使用，不复制配置。开发检查用 `python -m pip install -e ".[dev]"`，然后运行 `python -m unittest discover -s tests -v`。CI 在 Windows/Linux 与 Python 3.10/3.12 上执行离线测试；测试使用临时 PDF、SQLite 与模拟 API 响应，不需要用户的 Notion/Zotero 凭证。
 
 ## 首次使用
 
@@ -126,7 +133,7 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `notion.option_values` | select 字段的合法值 |
 | `zotero_tag_prefix` | 三族标签在 Zotero 侧的前缀 |
 
-环境变量可覆盖文件：`ZOTERO_DB`、`ZOTERO_DATA_DIR`、`NOTION_PAPERS_DB`、`NOTION_PAPERS_DS`。
+环境变量可覆盖文件：`ZOTERO_DB`、`ZOTERO_DATA_DIR`、`NOTION_PAPERS_DB`、`NOTION_PAPERS_DS`。本地配置按嵌套字段覆盖默认值，未填写的默认项保留；显式空值仍保留为空。
 
 `config.local.json` 是你自己的副本，不进版本库。
 
@@ -138,7 +145,7 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `venue` | text | 刊名或会议名，不带年份 |
 | `year` | number | |
 | `type` | select | `conference` / `journal` / `review` / `other` |
-| `citekey` | text | Zotero citationKey，幂等主键 |
+| `citekey` | text | 机器键（`sha1` 前 10 位），幂等主键 |
 | `read_level` | select | `扫` / `精读` |
 | `problem` | multi-select | 问题域 |
 | `method` | multi-select | 方法族 |
@@ -168,6 +175,8 @@ Notion 是主库，Zotero 只存 PDF 与书目信息。被本 skill 读过的条
 
 一个条目可以同时在 `sounding` 和课题集合（如 `分子胶新`）里——Zotero 集合是多对多，两边不冲突：课题集合供按项目浏览，`sounding` 供备份与审计。写入时脚本先读现有 `collections` 再追加，因为该字段是整表替换，漏读会把条目从别的集合踢出去。
 
+笔记正文头部的 PDF 指针也指这里：`本地 PDF：<Zotero 附件绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写阅读文件夹里的临时路径——`sounding` 里的那一份才是这份 skill 维护的副本。
+
 ## Notion 工具
 
 笔记的成品位置是 Notion 页面。Notion 工具不可用时才退回 `notes/<citekey>.md`，并告诉你待上传；写成功了就不在本地再留一份，两份必然分叉。
@@ -183,6 +192,7 @@ reference-evidence.md    所有类型的共用规则：符号、损失、指标�
 reference-metrics.md     标准指标与统计术语表
 reference-tags.md        三族受控词表
 reference-library.md     字段映射、幂等、回写
+reference-engineering.md 缓存、批量裁图、机械校验、运行记录的命令约定
 reference-wave.md        观潮判据：潮、世代、课题组、开创了什么
 reference-topic.md       课题页模板
 config.example.json      出厂默认
@@ -192,7 +202,14 @@ scripts/zotero_write.py  把标签与 Notion 链接写回条目（需要 API key
 scripts/setup.py         首次配置：探测、校验、写 config.local.json
 scripts/fig.py           在页面上找出图片块并裁出
 scripts/config.py        脚本共用的配置读取
-scripts/check_config.py  校验配置能对上真实数据库
+scripts/check_config.py  离线校验配置，或对照导出的真实 schema
+scripts/pdf_prepare.py   缓存逐页原文与来源定位
+scripts/paper_identity.py 共用身份查询与只读快照
+scripts/validate_note.py  机械验收
+scripts/run_state.py      运行进度与失效检查
+schemas/run.schema.json   运行状态格式
+tests/                   离线行为测试
+pyproject.toml           Python 版本与依赖
 ```
 
 `reference-evidence.md` 存在的意义是规则只写一次：模板只放结构与验收，规则改了只改一处。
@@ -204,17 +221,21 @@ python scripts/zotero_find.py "attention is all you need"
 python scripts/zotero_find.py --citekey yangArbovirusSuppressionLectin2025 --pdf
 python scripts/zotero_find.py --list-collections
 python scripts/zotero_find.py --tags
+python scripts/zotero_find.py --citekey yangArbovirusSuppressionLectin2025 --json
 
 python scripts/zotero_write.py --citekey key --show
 python scripts/zotero_write.py --citekey key --tags p:x,m:y,d:z --extra https://www.notion.so/…
 
 python scripts/fig.py scan paper.pdf --page 3
 python scripts/fig.py crop paper.pdf --page 3 --bbox 197,72,415,394 --out fig1.png --dpi 220
+python scripts/pdf_prepare.py paper.pdf --pages 2-5 --search loss
+python scripts/fig.py batch paper.pdf --manifest crops.json --out-dir notes/figs/example
 
-python scripts/check_config.py    # 需要 NOTION_TOKEN
+python scripts/check_config.py    # 离线配置检查
+python scripts/check_config.py --schema-json notes/schema.json
 ```
 
-`zotero_find.py` 读的是数据库副本，Zotero 开着也能用。`fig.py scan` 会打印图片块的边界框和同页的图注块，图和图注可以对上号。
+`zotero_find.py` 用 SQLite backup 创建只读内存快照，包含已提交的 WAL 内容，每次调用使用当前一致状态。`fig.py scan` 打印图片块边界和完整候选图注，批量裁图仍需人工确认区域。缓存和运行记录默认放在 git 忽略的 `notes/` 下；它们可删除、可重建，不是第二份笔记主库。完整命令、校验边界和失败续做见 [reference-engineering.md](reference-engineering.md)。
 
 ## 判类型
 
@@ -232,6 +253,8 @@ python scripts/check_config.py    # 需要 NOTION_TOKEN
 单篇笔记回答「这篇做了什么」，观潮回答「这篇在整片潮里站在哪」。
 
 三条判据同时成立才算一波潮：有台阶、有迁移、有沉淀。缺哪条，就用缺的那条命名它（渐进线 / 单组自嗨 / 一时热闹）。世代、课题组、开创了什么，以及置信度与推翻条件，写法见 `reference-wave.md`。
+
+课题组以**通讯作者**为准：姓名取 PDF 首页的 correspondence 脚注或 † 标记，机构取其署名单位，代码仓库只写论文正文给出链接的那个。认组不等于认名单——名单会变，实验室不会。
 
 ## License
 

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sounding-skill"
+version = "0.1.0"
+description = "Evidence-grounded paper reading helpers for the Sounding agent skill"
+requires-python = ">=3.10"
+dependencies = ["PyMuPDF>=1.24,<2"]
+
+[project.optional-dependencies]
+dev = ["PyYAML>=6,<7", "jsonschema>=4.20,<5"]
+
+[tool.setuptools]
+py-modules = []
+
+# The skill is used from its directory. Installing this project provides its
+# dependencies; it does not install a second copy of the skill or user config.
