@@ -55,24 +55,28 @@ description: 收到一篇研究论文后，直接按完整 sounding 流程拆成
 
 ## 2 定位 PDF
 
-不要先问用户路径，先查本地库：
+先判断 Zotero 是否已配置（`config.local.json` → `zotero.data_dir` 存在且 `zotero.sqlite` 可读）：
 
-```bash
-python scripts/zotero_find.py "author 2025 keyword"
-python scripts/zotero_find.py --citekey <citekey> --pdf
-python scripts/zotero_find.py --tags
-python scripts/zotero_find.py --citekey <citekey> --json
-```
+- **已配置 Zotero**：先查本地库，不要先问用户路径。
+  ```bash
+  python scripts/zotero_find.py "author 2025 keyword"
+  python scripts/zotero_find.py --citekey <citekey> --pdf
+  python scripts/zotero_find.py --tags
+  python scripts/zotero_find.py --citekey <citekey> --json
+  ```
+  第二种只打印绝对路径，可直接喂给 `fig.py`；第三种打印库里实际在用的标签，**建新标签前先看它**。
+  查不到换 `--citekey` 再试，仍无则问用户要文件或 DOI，并说明搜了什么。
+- **未配置 Zotero（用户没装 Zotero）**：问用户选一个本地目录作为 PDF 原文存放位置（例如 `D:\document\sounding-pdfs\`），记住这个路径，后续重命名副本存这里。不跑 `zotero_find.py`、不建 Zotero 条目、不回写 Extra。
 
-第二种只打印绝对路径，可直接喂给 `fig.py`；第三种打印库里实际在用的标签，**建新标签前先看它**。
-
-查不到换 `--citekey` 再试，仍无则问用户要文件或 DOI，并说明搜了什么。全文没打开过，不写 sounding 笔记。路径从 `config.local.json` 读，读不到就报错并说明要配什么。
+全文没打开过，不写 sounding 笔记。
 
 PDF 确定后先用 `python scripts/pdf_prepare.py "<PDF>"` 获取带页码的全文、图注候选和坐标缓存。重复查询与裁图复用同一 PDF 指纹的结果；缓存不代替完整阅读或看图。无文字层、部分页面无文字层、版本变化都保留在 manifest 中。命令和批量裁图见 `reference-engineering.md`。
 
 ### PDF 指针怎么写
 
-笔记正文的**头部**写 PDF 指针，指向 Zotero 的 `sounding` 集合里那一条，不写散落在别处的临时路径。两条信息都要：
+笔记正文的**头部**写 PDF 指针，指向这份 skill 维护的那一份副本，不写散落在别处的临时路径。
+
+**已配置 Zotero**（指向 Zotero `sounding` 集合里的附件）：
 
 ```markdown
 本地 PDF：`<zotero.data_dir>\storage\<item key>\<filename>.pdf`（Zotero 集合 `<collection>` 内的附件）
@@ -83,12 +87,24 @@ Zotero：`zotero://select/library/items/<item key>`（粘进地址栏即跳到�
 - 条目链接用 `zotero://select/library/items/<item key>`，item key 从 `zotero_find.py` 的输出取。
 - 集合名固定写 `sounding`（取自 `config.local.json` → `zotero.collection`）；条目不在这个集合里就先跑 `zotero_add.py` 并进去。
 - Notion 不接受 `file://` 协议，所以链接给 `zotero://`，不给本地路径做超链接；路径只作文字留证。
+- 入库之后再写指针：`zotero_add.py` 成功才算有 `zotero://` 那一条，指针与实际附件必须对得上。
 
-入库之后再写指针：`zotero_add.py` 成功才算有 `zotero://` 那一条，指针与实际附件必须对得上。
+**未配置 Zotero**（指向用户指定的本地目录）：
+
+```markdown
+本地 PDF：`<用户指定目录>\<重命名名>.pdf`
+```
+
+没有 `zotero://` 那一行，也没有 Zotero 集合说明。
 
 ### PDF 重命名副本（文件名 = Notion 标题）
 
-分析始终用你丢进来的**原始 PDF**（`pdf_prepare.py`、判类型、裁图都基于它）；到第 8 步落库时，才按分析得出的类型与核心发现生成**重命名副本**，存进 `sounding` 集合目录（`config.local.json` → `zotero.data_dir` 下的 `zotero.collection` 目录，本机即 `<zotero.data_dir>\sounding`，不要写死绝对路径），之后的 `zotero_add.py --pdf` 传这个副本。副本文件名就是这篇的**重命名名**。
+分析始终用你丢进来的**原始 PDF**（`pdf_prepare.py`、判类型、裁图都基于它）；到第 8 步落库时，才按分析得出的类型与核心发现生成**重命名副本**。
+
+- **已配置 Zotero**：副本存进 `sounding` 集合目录（`config.local.json` → `zotero.data_dir` 下的 `zotero.collection` 目录，本机即 `<zotero.data_dir>\sounding`，不要写死绝对路径），之后的 `zotero_add.py --pdf` 传这个副本。
+- **未配置 Zotero**：副本存进用户在第 2 步指定的本地目录。
+
+副本文件名就是这篇的**重命名名**。
 
 命名方案按贡献类型二选一：
 
@@ -212,9 +228,9 @@ citekey：zhangSpatialAtlas2024
 
 同一篇读两次，库里只能有一行。字段映射、缺字段处理、标签与回写见 `reference-library.md`。
 
-两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（`Extra` 写 `Notion: <url>`，三族标签加 `p:` / `m:` / `d:` 前缀）。
+两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（已配置 Zotero 时：`Extra` 写 `Notion: <url>`，三族标签加 `p:` / `m:` / `d:` 前缀；未配置 Zotero 时跳过此步，笔记里 PDF 指针指向用户指定目录）。
 
-发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。Notion 图片上传必须批量申请上传槽、受控并发上传、一次插入并统一回读；具体处理见 `reference-library.md` §6.3。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
+发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。主图用 `scripts/fig_upload.py crop` 裁完→Notion MCP 上传→`fig_upload.py tag` 出标签，三步硬依赖（未上传则 tag 报错）；具体见 `reference-library.md` §6.3。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
 
 **Notion 页面回读成功才算发布。** 本地稿、schema 离线校验、MCP 工具发现或写入请求已发出，都不能单独证明落库完成。完成标准与探针见 `reference-notion.md`。
 
@@ -255,7 +271,7 @@ Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.y
 ## 验收
 
 - [ ] 模板与结构相符，`类型` 与正文一致
-- [ ] PDF 已生成重命名副本存入 `sounding`，文件名 = 重命名名 = Notion `标题`（算法类「方法名：一句话灵感」／非算法「一句话中文核心发现」）
+- [ ] PDF 已生成重命名副本存入 `sounding`（或用户指定目录），文件名 = 重命名名 = Notion `标题`（算法类「方法名：一句话灵感」／非算法「一句话中文核心发现」）
 - [ ] 四行元信息头齐全；年份在正文 `发表` 里，不在该字段里
 - [ ] 速览正好 10 行，每行一句
 - [ ] 每个数字都有 `Fig.` / `Table` / `Sec.` 出处
@@ -269,4 +285,4 @@ Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.y
 - [ ] Notion 工作区探针缓存有效（或本次刚完成）；页面写入后按同一 page ID 回读成功
 - [ ] 笔记有 `定位素材`，默认状态为 `待回顾`，未自动填写地图字段
 - [ ] 做了观潮的，结论经过用户确认，并记录证据强度与推翻条件
-- [ ] Zotero `Extra` 与三族标签已回写
+- [ ] 已配置 Zotero：`Extra` 与三族标签已回写；未配置：PDF 副本已存入用户指定目录

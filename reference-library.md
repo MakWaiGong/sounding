@@ -201,9 +201,29 @@ python scripts/zotero_write.py --citekey <citekey> \
 
 正文仍由 Notion MCP 写入。首次发布前必须先按 `reference-notion.md` 完成 MCP 安装、schema 与读写探针；只读成功不够。随后检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
 
-1. 把已核对的裁图通过工具支持的上传方式上传，或使用用户已有的可访问托管地址。记录每张图的源 PDF 指纹、页码、裁图哈希和上传返回的标识；批量裁图清单可提供这些来源信息。多张图先批量申请上传槽，再以 3–4 个并发上传；单个响应失败只重试该图。
-2. 直接复用上传响应的 `markdown_source`，收齐后一次性按正文位置插入全部图片并写属性；不要为同一文件重复做 attachment 转换，也不要逐图插入、逐图回读。最后回读同一页面一次，核对 citekey、正文和全部图片块/文件引用；工具能预览时检查图像可见。
-3. 工具不支持上传、上传失败或只能核对块而不能确认图像时，明确记录缺失项。页面可先保存，任务状态保持「发布受阻（未完成）」，不宣称整篇已发布完成。不要为绕过上传而公开私人 PDF 或图片。
+1. **裁图**：用 `scripts/fig_upload.py crop` 一次裁完所有主图，不要用 `fig.py page` 整页渲染当图。命令格式：
+   ```bash
+   python scripts/fig_upload.py crop paper.pdf --citekey <key> \
+       --fig "3:35,130,565,750:fig1" \
+       --fig "7:35,45,565,710:fig3"
+   ```
+   产出 `notes/figs/<citekey>/manifest.json`，每张图的 `notion_source` 初始为 null。
+2. **上传**：对 manifest 中每张裁图，调 Notion MCP `notion_create_file_upload`（filename 用 `<label>.png`），拿到 upload_url 后立即 `curl.exe -F "file=@<local_path>"` 上传。多张图批量申请上传槽后并发上传，单个失败只重试该图。
+3. **出标签**：把每张图上传返回的 `markdown_source`（`file-upload://uuid`）喂回脚本：
+   ```bash
+   python scripts/fig_upload.py tag --citekey <key> \
+       --source fig1=file-upload://<uuid1> --source fig3=file-upload://<uuid3>
+   ```
+   **若有图未上传，tag 直接报错退出**——这是硬依赖，不允许跳过上传只裁图。产出的 `<image source=...>` 标签按正文位置一次性插入 Notion 页面。
+4. **图注**：每张图下面跟一行斜体图注，不是"这张图长什么样"，而是"从这张图你该带走什么"。必须包含三要素：
+   - **支撑哪个子命题**（P1/P2/P3/P4，或"概念框架"）
+   - **关键内容**：算法类写清数学对应/架构设计决策/对比数字；实验类写清样本量/效应量/统计显著性
+   - **一句 insight**：读者看完图后应该记住的结论，不是重复图标题
+
+   **算法类架构图/流程图额外加读图引导**：按图里的空间方向（从左到右/从上到下）逐个说清关键模块是什么、箭头表示什么数据流/信号流。算法类论文的架构图读者第一眼往往看不懂结构，图注要当导游。数据图（折线/柱状/热图）不需要这步。
+
+   反例："9个token mixer×8个数据集受控对比"（只说了做了什么）。正例："P3 受控对比：参数规模相同只换token mixer，静态图像Conv最优、神经形态linear attention最优、MQAR检索只有2D矩阵记忆能做——SparseLA在中等记忆任务上效率/性能平衡最好"。
+5. 最后回读同一页面一次，核对 citekey、正文和全部图片块；工具不支持上传或上传失败时，任务状态保持「发布受阻（未完成）」，不宣称完成。不要为绕过上传而公开私人 PDF 或图片。
 4. 记录 Notion page ID 后再回写 Zotero。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
 
 `run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应、分段耗时与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。
