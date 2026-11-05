@@ -65,6 +65,17 @@ def check_hash(value, field):
     return value
 
 
+def validate_timings(receipt, result):
+    timings = receipt.get("timings_ms")
+    if timings is None:
+        return
+    if (not isinstance(timings, dict) or
+            any(not isinstance(key, str) or not key.strip() for key in timings) or
+            any(type(value) is not int or value < 0 for value in timings.values())):
+        raise ValueError("timings_ms must map non-empty names to non-negative integers")
+    result["timings_ms"] = dict(timings)
+
+
 def load_state(path):
     with Path(path).open(encoding="utf-8-sig") as stream:
         state = json.load(stream)
@@ -176,11 +187,13 @@ def validate_receipt(state, step, receipt, check_files=True):
         if receipt.get("citekey") != state["citekey"]:
             raise ValueError("validation report citekey does not match this run")
         result.update(valid=True, errors=[], citekey=receipt["citekey"])
+        validate_timings(receipt, result)
         return result
     if receipt.get("readback_checked") is not True:
         raise ValueError("remote receipts require readback_checked=true from an actual readback")
     page_id = require_text(receipt.get("page_id"), "page_id")
     result.update(page_id=page_id, readback_checked=True)
+    validate_timings(receipt, result)
     published = state["steps"].get("notion_written", {}).get("evidence", {})
     if step != "notion_written" and published and published.get("page_id") != page_id:
         raise ValueError("receipt page_id differs from the recorded Notion page")

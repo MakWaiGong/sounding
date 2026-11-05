@@ -1,6 +1,6 @@
 ---
 name: sounding
-description: 把研究论文拆成结构化笔记，并为用户主导的批量观潮回顾准备可核对的定位素材。按论文结构（不看发表处）在 conference、journal、other、scan 四种骨架里选一种。单篇默认不由 agent 判定 wave；回顾时由 agent 对齐多篇证据，用户确认后再回写。精读笔记必须发布到 Notion，按稳定 citekey 幂等并回写 Zotero；缺少 Notion 工具时先安装、配置并测试 MCP，不能以本地稿结束。Use when the user asks to read, deconstruct, annotate or summarize a paper (读这篇, 拆这篇, 精读, 文献笔记, 观潮, 测深, paper reading, sounding), or to add a paper to the reading library.
+description: 收到一篇研究论文后，直接按完整 sounding 流程拆成结构化笔记，并为用户主导的批量观潮回顾准备可核对的定位素材。按论文结构（不看发表处）在 conference、journal、other 三种骨架里选一种；不做扫读、摘要式降级或“是否值得精读”的前置判断。单篇默认不由 agent 判定 wave；回顾时由 agent 对齐多篇证据，用户确认后再回写。笔记必须发布到 Notion，按稳定 citekey 幂等并回写 Zotero；缺少 Notion 工具时先安装、配置并测试 MCP，不能以本地稿结束。Use when the user asks to read, deconstruct, annotate or summarize a paper (读这篇, 拆这篇, 精读, 文献笔记, 观潮, 测深, paper reading, sounding), or to add a paper to the reading library.
 ---
 
 # 观潮 / Sounding
@@ -12,7 +12,7 @@ description: 把研究论文拆成结构化笔记，并为用户主导的批量�
 | 测深 | 拆开一篇：重建它的论证，并留下可供横向比较的事实 | 一份笔记 + 定位素材 |
 | 观潮 | 集中回顾一批：agent 对齐证据与候选划分，用户决定潮、世代、角色与开创性 | 用户确认后的定位 + 全局潮图 |
 
-顺序不能反，也不要把两层强行塞进同一次单篇阅读。单篇默认停在「待回顾」；观潮是独立的批量回顾，不是精读的自动尾声。
+顺序不能反，也不要把两层强行塞进同一次单篇阅读。单篇默认完成完整 sounding 分析并停在「待回顾」；观潮是独立的批量回顾，不是单篇分析的自动尾声。
 
 三条不可破：
 
@@ -34,7 +34,7 @@ description: 把研究论文拆成结构化笔记，并为用户主导的批量�
 | `reference-tags.md` | 打标签时 —— 三族受控词表 |
 | `reference-library.md` | 落库时 —— 字段映射、幂等、回写 |
 | `reference-engineering.md` | 提取 PDF、批量裁图、机械校验、恢复中断任务时 —— 命令与中间文件约定 |
-| `reference-notion.md` | 首次安装、Notion 工具缺失、换工作区或发布失败时 —— MCP 安装、读写探针与完成标准 |
+| `reference-notion.md` | 首次安装、Notion 工具缺失、换工作区或发布失败时 —— 工作区级探针、并行传图与完成标准 |
 | `reference-wave.md` | 用户发起观潮回顾、维护既有潮或确认定位时 —— 比较材料、候选划分、人工决策与回写 |
 | `reference-topic.md` | 维护课题页时 |
 
@@ -66,7 +66,7 @@ python scripts/zotero_find.py --citekey <citekey> --json
 
 第二种只打印绝对路径，可直接喂给 `fig.py`；第三种打印库里实际在用的标签，**建新标签前先看它**。
 
-查不到换 `--citekey` 再试，仍无则问用户要文件或 DOI，并说明搜了什么。全文没打开过，不写精读笔记。路径从 `config.local.json` 读，读不到就报错并说明要配什么。
+查不到换 `--citekey` 再试，仍无则问用户要文件或 DOI，并说明搜了什么。全文没打开过，不写 sounding 笔记。路径从 `config.local.json` 读，读不到就报错并说明要配什么。
 
 PDF 确定后先用 `python scripts/pdf_prepare.py "<PDF>"` 获取带页码的全文、图注候选和坐标缓存。重复查询与裁图复用同一 PDF 指纹的结果；缓存不代替完整阅读或看图。无文字层、部分页面无文字层、版本变化都保留在 manifest 中。命令和批量裁图见 `reference-engineering.md`。
 
@@ -75,8 +75,8 @@ PDF 确定后先用 `python scripts/pdf_prepare.py "<PDF>"` 获取带页码的�
 笔记正文的**头部**写 PDF 指针，指向 Zotero 的 `sounding` 集合里那一条，不写散落在别处的临时路径。两条信息都要：
 
 ```markdown
-本地 PDF：`D:\document\Zotero\storage\IKRKRZWG\JitRL.pdf`（Zotero 集合 `sounding` 内的附件）
-Zotero：`zotero://select/library/items/FN54EIHA`（粘进地址栏即跳到该条目）
+本地 PDF：`<zotero.data_dir>\storage\<item key>\<filename>.pdf`（Zotero 集合 `<collection>` 内的附件）
+Zotero：`zotero://select/library/items/<item key>`（粘进地址栏即跳到该条目）
 ```
 
 - 路径来自 `zotero_find.py --citekey <citekey> --pdf`，是 Zotero 附件的真实存放位置。
@@ -85,6 +85,19 @@ Zotero：`zotero://select/library/items/FN54EIHA`（粘进地址栏即跳到该�
 - Notion 不接受 `file://` 协议，所以链接给 `zotero://`，不给本地路径做超链接；路径只作文字留证。
 
 入库之后再写指针：`zotero_add.py` 成功才算有 `zotero://` 那一条，指针与实际附件必须对得上。
+
+### PDF 重命名副本（文件名 = Notion 标题）
+
+分析始终用你丢进来的**原始 PDF**（`pdf_prepare.py`、判类型、裁图都基于它）；到第 8 步落库时，才按分析得出的类型与核心发现生成**重命名副本**，存进 `sounding` 集合目录（`config.local.json` → `zotero.data_dir` 下的 `zotero.collection` 目录，本机即 `<zotero.data_dir>\sounding`，不要写死绝对路径），之后的 `zotero_add.py --pdf` 传这个副本。副本文件名就是这篇的**重命名名**。
+
+命名方案按贡献类型二选一：
+
+| 类型 | 命名 | 例子 |
+| --- | --- | --- |
+| 算法类（以方法／算法为核心贡献） | `方法名：一句话灵感` | `Diffusion：把细胞状态嵌进统一流形` |
+| 非算法类（以发现／机制／数据集为核心） | `一句话中文核心发现` | `丘脑中线汇聚皮层信号决定回避决策` |
+
+**重命名名 = PDF 副本文件名 = Notion 页面的标题（`标题` 字段）。** 三处始终一致，是这篇在本 skill 里的检索入口。判定"算法类 / 非算法类"沿用第 3 步的判据——结论靠方法立住就是算法类，靠证据链／机制立住就是非算法类；不按发表处。方法名用论文提出的主方法名，一句话由你按 sounding 分析结果中文生成，保持可扫读（≤ 20 字，不用副标题式长句）。
 
 ## 3 判类型：看结构，不看发表处
 
@@ -103,23 +116,13 @@ Zotero：`zotero://select/library/items/FN54EIHA`（粘进地址栏即跳到该�
 
 选择写进笔记第 3 行和 `类型` 字段。
 
-## 4 定深度
+## 4 直接做完整 sounding
 
-先定，不要中途漂移。
+用户给出一篇论文或要求分析一篇文献，就直接执行完整流程：定位全文、判结构、按对应模板重建论证、裁原图、补齐证据表、生成定位素材、发布 Notion 并回写 Zotero。
 
-**扫** —— 三行，不套模板、不裁图、不列符号表。两分钟。
+没有扫读模式，也不先输出一句“值不值得精读”。`去留` 仍是完整分析后的结论，不是决定是否开始分析的门槛。
 
-```
-是什么：<用什么方法解决什么问题>
-为什么可能有用：<与哪个在研问题或方法有关>
-去留：<升级精读 / 留作背景 / 不需要>
-```
-
-`读法 = 扫`。以后要升级，**从头写**精读；把三行抻长，等于两头不占。
-
-**精读** —— 模板全套，`读法 = 精读`。
-
-默认：没带问题来的论文先扫，并给一句值不值得精读；为某个问题或课题而读的，直接精读。材料只够扫（只有摘要）时明确降级，并说明依据。
+只有摘要、首页、新闻稿或二手转述时，材料不足以完成 sounding；停止并索取全文，不生成三行替代品，不把摘要扩写成完整笔记。
 
 ## 5 读的顺序
 
@@ -136,7 +139,7 @@ Zotero：`zotero://select/library/items/FN54EIHA`（粘进地址栏即跳到该�
 ## 6 写
 
 ```markdown
-标题：<短标题，不是全称>
+标题：<重命名名；算法类"方法名：一句话灵感"，非算法类"一句话中文核心发现"——与 PDF 副本文件名、Notion 标题一致>
 发表：Nature Methods (2024)
 类型：journal
 citekey：zhangSpatialAtlas2024
@@ -171,7 +174,7 @@ citekey：zhangSpatialAtlas2024
 
 ## 7 观潮：单篇留素材，集中回顾再定位
 
-精读一篇时，不判断它属于哪波潮，不填世代、角色、`开创了什么`，也不写 wave relation。笔记末尾只加：
+分析一篇时，不判断它属于哪波潮，不填世代、角色、`开创了什么`，也不写 wave relation。笔记末尾只加：
 
 ```markdown
 ## 定位素材
@@ -184,11 +187,11 @@ citekey：zhangSpatialAtlas2024
 待横向确认：<必须和其他论文对照才能判断的事项>
 ```
 
-只记录论文与可核对来源给出的事实；「可能开创」「看起来属于」放进 `待横向确认`，不改写成结论。扫描笔记仍保持三行，不追加这个块。
+只记录论文与可核对来源给出的事实；「可能开创」「看起来属于」放进 `待横向确认`，不改写成结论。
 
 四种状态不能混用：
 
-- `待回顾`：尚未做跨论文判断；这是单篇精读的默认状态。
+- `待回顾`：尚未做跨论文判断；这是单篇 sounding 分析的默认状态。
 - `已定位`：用户已经确认潮、世代、角色或其他地图判断。
 - `无对应潮`：用户回顾后明确判定不属于现有或新建的潮。
 - `待复核`：原定位被新证据重新打开，暂时不能当作稳定结论。
@@ -211,7 +214,7 @@ citekey：zhangSpatialAtlas2024
 
 两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（`Extra` 写 `Notion: <url>`，三族标签加 `p:` / `m:` / `d:` 前缀）。
 
-发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。Notion 图片上传、回读与部分失败的处理见 `reference-library.md` §6.3；长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤。记录不代替外部工具的成功响应。
+发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。Notion 图片上传必须批量申请上传槽、受控并发上传、一次插入并统一回读；具体处理见 `reference-library.md` §6.3。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
 
 **Notion 页面回读成功才算发布。** 本地稿、schema 离线校验、MCP 工具发现或写入请求已发出，都不能单独证明落库完成。完成标准与探针见 `reference-notion.md`。
 
@@ -223,7 +226,7 @@ citekey：zhangSpatialAtlas2024
 | --- | --- |
 | PDF 无文字层（扫描件） | 停。说明是扫描件，要可读版本。不 OCR 之后当原文引用 |
 | 主表或主图找不到 | 能写的写完，缺的节标 `缺：<什么>`，`待查` 加一行 |
-| 只有摘要或只有首页 | 降级为扫，说明实际读了什么 |
+| 只有摘要、首页或二手转述 | 停。说明材料不足，索取全文；不生成缩略替代笔记 |
 | 干湿结合、两种模板都想要 | 用 journal 骨架装论证，湿实验走 `reference-evidence.md` §4。不要在一个标题下跑两套节序 |
 | 图号／表号／页码对不上 | 停。先确认是同一版本（预印本 vs 见刊） |
 | 同一篇有多个 Zotero 条目 | 停。用户先合并，否则 citekey 唯一性就破了 |
@@ -241,9 +244,9 @@ citekey：zhangSpatialAtlas2024
 
 ## 11 Notion 是发布硬依赖
 
-Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.yaml`。工具不可用时，先安装或连接 MCP、完成 OAuth，并按 `reference-notion.md` 做一次创建—回读—更新—清理探针；通过后继续原任务。
+Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.yaml`。工具不可用时，先安装或连接 MCP、完成 OAuth，并按 `reference-notion.md` 做一次创建—回读—更新—清理探针；通过后用 `scripts/notion_workspace.py` 缓存工作区验收。缓存有效时逐篇发布不得重跑探针；工作区配置变化或实际权限、OAuth、schema 错误才使它失效。
 
-连接因权限、网络或用户尚未完成 OAuth 而暂时受阻时，可以把工作稿保存在 `notes/<citekey>.md` 防止丢失，但它只是恢复材料。任务状态必须写「发布受阻（未完成）」，不能把本地回退产物当成精读笔记已经完成。
+连接因权限、网络或用户尚未完成 OAuth 而暂时受阻时，可以把工作稿保存在 `notes/<citekey>.md` 防止丢失，但它只是恢复材料。任务状态必须写「发布受阻（未完成）」，不能把本地回退产物当成 sounding 笔记已经完成。
 
 ## 12 课题页
 
@@ -252,6 +255,7 @@ Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.y
 ## 验收
 
 - [ ] 模板与结构相符，`类型` 与正文一致
+- [ ] PDF 已生成重命名副本存入 `sounding`，文件名 = 重命名名 = Notion `标题`（算法类「方法名：一句话灵感」／非算法「一句话中文核心发现」）
 - [ ] 四行元信息头齐全；年份在正文 `发表` 里，不在该字段里
 - [ ] 速览正好 10 行，每行一句
 - [ ] 每个数字都有 `Fig.` / `Table` / `Sec.` 出处
@@ -262,7 +266,7 @@ Notion 读写走官方 Remote Notion MCP，skill dependency 见 `agents/openai.y
 - [ ] 湿实验：n（数的是什么）、重复、检验、SD/SEM、p、校正
 - [ ] 与已读的关系至少一条
 - [ ] 写前按 citekey 查过：更新而非重复
-- [ ] Notion MCP 已通过读写探针；页面写入后按同一 page ID 回读成功
-- [ ] 精读笔记有 `定位素材`，默认状态为 `待回顾`，未自动填写地图字段
+- [ ] Notion 工作区探针缓存有效（或本次刚完成）；页面写入后按同一 page ID 回读成功
+- [ ] 笔记有 `定位素材`，默认状态为 `待回顾`，未自动填写地图字段
 - [ ] 做了观潮的，结论经过用户确认，并记录证据强度与推翻条件
 - [ ] Zotero `Extra` 与三族标签已回写

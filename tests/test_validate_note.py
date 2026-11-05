@@ -41,21 +41,14 @@ class ValidateNoteTests(unittest.TestCase):
             self.path.write_text(text, encoding="utf-8")
         return validate_note.validate_note(self.path, **kwargs)
 
-    def test_all_deep_templates_and_hash(self):
+    def test_all_templates_and_hash(self):
         for kind in ("conference", "journal", "other"):
             with self.subTest(kind=kind):
                 report = self.validate(note_text(kind), source_manifest=self.manifest)
                 self.assertTrue(report["valid"], report["errors"])
+                self.assertEqual(report["schema_version"], 2)
                 self.assertEqual(report["source_sha256"], "a" * 64)
                 self.assertEqual(report["note_sha256"], hashlib.sha256(self.path.read_bytes()).hexdigest())
-
-    def test_scan_is_three_lines_without_deep_requirements(self):
-        text = "是什么：一种方法。\n为什么可能有用：可用于当前任务。\n去留：升级精读\n"
-        report = self.validate(text, read_level="scan", expected_citekey="paper-key")
-        self.assertTrue(report["valid"])
-        self.assertEqual(report["citekey"], "paper-key")
-        report = self.validate(text + "多余的一行\n", read_level="scan")
-        self.assertFalse(report["valid"])
 
     def test_wrong_digest_and_citekey(self):
         report = self.validate(note_text(digest_count=9), expected_citekey="other")
@@ -100,11 +93,9 @@ class ValidateNoteTests(unittest.TestCase):
         self.assertTrue(report["valid"])
         self.assertEqual(report["warnings"], [])
 
-    def test_no_text_layer_blocks_only_deep(self):
+    def test_no_text_layer_blocks_sounding(self):
         self.manifest["text_layer_status"] = "absent"
         self.assertFalse(self.validate(source_manifest=self.manifest)["valid"])
-        scan = "是什么：一个问题。\n为什么可能有用：摘要相关。\n去留：留作背景\n"
-        self.assertTrue(self.validate(scan, read_level="scan", source_manifest=self.manifest)["valid"])
 
     def test_cli_report_exit_and_utf8(self):
         output = self.root / "report.json"

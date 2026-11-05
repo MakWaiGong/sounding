@@ -9,18 +9,18 @@
 
 | 动作 | 问的问题 |
 | --- | --- |
-| 选 | 这一批里先读哪几篇，哪几篇只扫 |
+| 选 | 这一批里先完整分析哪几篇 |
 | 拆 | 这篇的结论靠什么立住，证据到哪为止 |
 | 放 | 横向比较这一批，由用户决定潮的边界、第几代、谁在推 |
 | 判 | 这个方向缺什么，缺的那一格可不可测 |
 
-模板是它的产物，不是它的定义。真正被规定的是判据：什么时候只该扫、什么时候必须精读、什么话在证据不足时不许写。
+模板是它的产物，不是它的定义。用户交来一篇论文时不做扫读分流，直接完整分析；真正被规定的是如何重建论证，以及什么话在证据不足时不许写。
 
 ## 产物
 
 单篇读完先产出笔记与定位素材；一批回顾后再产出位置和方向判断：
 
-- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、四种骨架之一（按论文结构选：conference 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / journal 三段式 / other 通用式 / scan 三行）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
+- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、三种骨架之一（按论文结构选：conference 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / journal 三段式 / other 通用式）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
 - **定位素材** —— 单篇只留可核对的能力变化、比较口径、课题组事实和前后作线索，状态为 `待回顾`；不自动判 wave
 - **位置** —— 回顾时由 agent 对齐多篇证据与候选划分，用户确认潮、世代、课题组、角色、开创性、证据强度与推翻条件后才回写
 - **判断** —— 这个方向缺什么，判据是什么，什么证据会推翻它
@@ -47,6 +47,7 @@
 | `scripts/fig.py` | 扫图注、裁图、渲染页面，支持 JSON 清单批量裁图 |
 | `scripts/validate_note.py` | 检查笔记结构、图片路径与来源定位；不代替语义核对 |
 | `scripts/run_state.py` | 记录实际完成步骤和待办，识别源文件/笔记变化 |
+| `scripts/notion_workspace.py` | 缓存工作区级 MCP 读写探针，避免逐篇重复验收 |
 
 ## 安装
 
@@ -91,7 +92,7 @@ python -m pip install -e .
 python scripts/setup.py
 ```
 
-skill 把官方 Remote Notion MCP 声明为必需依赖，地址是 `https://mcp.notion.com/mcp`。首次安装需完成 OAuth 和一次创建—回读—更新—清理探针；详细标准见 [reference-notion.md](reference-notion.md)。配置脚本问的只有这些，其余能探测就探测：
+skill 把官方 Remote Notion MCP 声明为必需依赖，地址是 `https://mcp.notion.com/mcp`。首次安装需完成 OAuth 和一次创建—回读—更新—清理探针；探针按工作区缓存，逐篇发布不重复执行。详细标准见 [reference-notion.md](reference-notion.md)。配置脚本问的只有这些，其余能探测就探测：
 
 | 要问的 | 怎么答 |
 | --- | --- |
@@ -147,7 +148,6 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `year` | number | |
 | `type` | select | `conference` / `journal` / `review` / `other` |
 | `citekey` | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；原始 DOI 只作身份与查询别名 |
-| `read_level` | select | `扫` / `精读` |
 | `problem` | multi-select | 问题域 |
 | `method` | multi-select | 方法族 |
 | `data` | multi-select | 数据类型 |
@@ -211,6 +211,7 @@ scripts/pdf_prepare.py   缓存逐页原文与来源定位
 scripts/paper_identity.py 共用身份查询与只读快照
 scripts/validate_note.py  机械验收
 scripts/run_state.py      运行进度与失效检查
+scripts/notion_workspace.py 工作区级 Notion 探针缓存
 schemas/run.schema.json   运行状态格式
 tests/                   离线行为测试
 pyproject.toml           Python 版本与依赖
@@ -246,6 +247,8 @@ python scripts/check_config.py --schema-json notes/schema.json
 `zotero_find.py` 用 SQLite backup 创建只读内存快照，包含已提交的 WAL 内容，每次调用使用当前一致状态。`fig.py scan` 打印图片块边界和完整候选图注，批量裁图仍需人工确认区域。缓存和运行记录默认放在 git 忽略的 `notes/` 下；它们可删除、可重建，不是第二份笔记主库。完整命令、校验边界和失败续做见 [reference-engineering.md](reference-engineering.md)。
 
 ## 判类型
+
+用户给出论文后直接执行完整 sounding，不先做扫读或价值筛选。全文不足时索取全文，不生成三行替代笔记。
 
 看**论文的结构**，不看发在哪。Nature、NeurIPS、TPAMI 都不在这条线的任何一边。
 

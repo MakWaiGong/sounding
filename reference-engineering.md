@@ -12,7 +12,7 @@ python scripts/pdf_prepare.py paper.pdf --search "ablation" --search "loss"
 
 输出 JSON manifest。页码从 1 开始；坐标是未旋转页面的 PDF point。manifest 带 PDF SHA-256、文字层状态、逐页原文、文字块、图片块、完整图注候选与章节候选。图注和章节边界是启发式候选，引用前仍需查看原 PDF。
 
-缓存键包含 PDF 字节指纹、提取器版本和 PyMuPDF 版本。相同字节从不同路径打开会复用缓存；PDF 字节、提取器版本、库版本变化，或缓存损坏时会重建。`--rebuild` 可强制重建，`--cache-dir` 可更换位置。脚本不 OCR、不改原 PDF；精读遇到 `text_layer_status=absent` 应停止。
+缓存键包含 PDF 字节指纹、提取器版本和 PyMuPDF 版本。相同字节从不同路径打开会复用缓存；PDF 字节、提取器版本、库版本变化，或缓存损坏时会重建。`--rebuild` 可强制重建，`--cache-dir` 可更换位置。脚本不 OCR、不改原 PDF；sounding 分析遇到 `text_layer_status=absent` 应停止。
 
 ## 2 裁原图
 
@@ -44,18 +44,16 @@ python scripts/fig.py batch paper.pdf --manifest crops.json --out-dir notes/figs
 ## 3 机械检查笔记
 
 ```bash
-python scripts/validate_note.py notes/<citekey>.md --read-level deep \
+python scripts/validate_note.py notes/<citekey>.md \
   --source-manifest notes/.pdf-cache/<manifest>.json --citekey <citekey> \
   --output notes/<citekey>.validation.json
-
-python scripts/validate_note.py notes/<citekey>.md --read-level scan --citekey <citekey>
 ```
 
-它检查元信息、精读十行速览、类型对应的主要章节、关系与待查、图片路径、来源页码和可识别图号。未知图号只警告，因为候选图注可能漏提；越界页码与无文字层精读会报错。`valid=true` 只表示机械结构通过，不表示某句话受到论文证据支持。
+它检查元信息、十行速览、类型对应的主要章节、关系与待查、图片路径、来源页码和可识别图号。未知图号只警告，因为候选图注可能漏提；越界页码与无文字层会报错。`valid=true` 只表示机械结构通过，不表示某句话受到论文证据支持。
 
 ## 4 中断后只续做未完成步骤
 
-长精读、Notion 图片上传或 Zotero 回写可能部分失败。初始化运行记录：
+长篇 sounding 分析、Notion 图片上传或 Zotero 回写可能部分失败。初始化运行记录：
 
 ```bash
 python scripts/run_state.py init --file notes/<citekey>.run.json \
@@ -63,7 +61,7 @@ python scripts/run_state.py init --file notes/<citekey>.run.json \
 python scripts/run_state.py status --file notes/<citekey>.run.json
 ```
 
-默认步骤为 `pdf_prepared,note_validated,notion_written,images_verified,zotero_written`。只做本地任务或扫读时可用 `--steps` 选择适用步骤；未配置的步骤不会被说成已完成。
+默认步骤为 `pdf_prepared,note_validated,notion_written,images_verified,zotero_written`。诊断或恢复某个子步骤时可用 `--steps` 限定范围；未配置的步骤不会被说成已完成。
 
 记录实际产物：
 
@@ -82,6 +80,8 @@ python scripts/run_state.py record --file notes/<citekey>.run.json \
 
 远端回执是 agent 对真实工具响应与回读结果的记录，不是脚本自行联网验证。Notion 回执至少含当前 `source_sha256`、`note_sha256`、`page_id`、`readback_checked: true`；图片回执另含 `images` 的本地路径、SHA-256、远端 block ID，或空数组与 `no_images_reason`；Zotero 回执另含 `item_key`。失败可用 `--failed "<原因>"` 记录，步骤仍为 pending。
 
+远端回执可带 `timings_ms`，值为各子阶段实际耗时的非负整数毫秒。Notion 发布至少记录 `schema_fetch`、`citekey_query`、`page_write`、`readback`；图片步骤记录 `upload_slots`、`upload_bytes`、`images_attach`、`readback`。没有测量就不填，不用阶段时间戳相减冒充网络耗时。
+
 源 PDF 改变会使所有步骤失效；笔记改变保留 PDF 提取状态，清除后续完成状态；已记录图片发生变化时，图片步骤重新 pending。再次运行 `init` 更新指纹后继续。状态格式见 `schemas/run.schema.json`。
 
 ## 5 配置与发布边界
@@ -92,3 +92,13 @@ python scripts/check_config.py --schema-json notes/notion-schema.json
 ```
 
 第一条只检查本地配置结构；第二条对照从 Notion MCP 获取的真实 schema 导出。离线通过不能表述为“真实数据库已验证”。Notion 图片的上传与回读、Zotero 回写顺序见 `reference-library.md`。
+
+Notion 读写探针是工作区级状态，不是逐篇步骤：
+
+```bash
+python scripts/notion_workspace.py status
+python scripts/notion_workspace.py record --evidence notes/notion-probe.json
+python scripts/notion_workspace.py invalidate --reason "OAuth expired"
+```
+
+缓存指纹包含 database、data source、字段映射和选项配置；任何一项变化会自动要求重新探针。真实 MCP 权限、OAuth 或 schema 错误也要主动失效缓存。普通超时或单文件上传失败只恢复对应子步骤。

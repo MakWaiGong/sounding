@@ -25,7 +25,6 @@
       "year": "",
       "type": "",
       "citekey": "",
-      "read_level": "",
       "problem": "",
       "method": "",
       "data": "",
@@ -43,9 +42,8 @@
       "followers": ""
     },
 
-    "_option_values_comment": "The legal values of the select fields. read_level, type and verdict are the ones the skill sets on its own.",
+    "_option_values_comment": "The legal values of the select fields. Type and verdict are set by the skill.",
     "option_values": {
-      "read_level": ["扫", "精读"],
       "type": ["conference", "journal", "review", "other"],
       "verdict": ["值得跟进", "存档", "仅作背景"]
     }

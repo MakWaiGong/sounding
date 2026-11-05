@@ -16,12 +16,12 @@ from pathlib import Path
 
 import config
 
-REQUIRED = ["title", "venue", "year", "type", "citekey", "read_level",
+REQUIRED = ["title", "venue", "year", "type", "citekey",
             "problem", "method", "data", "verdict"]
 OPTIONAL = ["topic", "domain", "wave", "group"]
 FIELD_TYPES = {
     "title": "title", "venue": "rich_text", "year": "number", "type": "select",
-    "citekey": "rich_text", "read_level": "select", "problem": "multi_select",
+    "citekey": "rich_text", "problem": "multi_select",
     "method": "multi_select", "data": "multi_select", "verdict": "select",
     "topic": "relation", "domain": "relation", "wave": "relation", "group": "relation",
     "confidence": "select", "role": "select", "generation": "relation",

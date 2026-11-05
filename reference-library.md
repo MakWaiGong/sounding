@@ -17,7 +17,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 第一条离线检查映射配置，不要求 Notion token，也不宣称检查过真实库。第二条检查从 MCP 获取并整理成 `{"properties": {"真实字段名": {"type": "rich_text"}}}` 格式的 schema JSON，包括字段类型和 select 合法值。保留实际 `select.options`，不要从配置反造 schema。任何一项报错，先修配置或库。直接调用旧版 Notion database API 的检查需显式加 `--online`，并设置 `NOTION_TOKEN`。
 
-运行期再确认一次：写之前 `fetch` 一次 `Papers` 的 schema，拿到当前真实字段列表。**配置文件是缓存，schema 才是事实。**
+运行期再确认一次：本次会话或批次第一次写之前 `fetch` 一次 `Papers` 的 schema，拿到当前真实字段列表；同一 data source 内复用，不逐篇重复 fetch，遇到 schema 错误立即丢弃缓存并重新获取。**配置文件是长期缓存，当前批次 fetch 到的 schema 才是事实。**
 
 ---
 
@@ -29,12 +29,11 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 | 概念 | 字段 | 类型 | 值 |
 | --- | --- | --- | --- |
-| `title` | 标题 | title | 短标题 |
+| `title` | 标题 | title | 重命名名（算法类「方法名：一句话灵感」；非算法类「一句话中文核心发现」）；与 PDF 副本文件名一致，见 §6.0 |
 | `venue` | 发表 | text | `Nature Methods`、`NeurIPS`，**不带年份** |
 | `year` | 年份 | number | 四位数字 |
 | `type` | 类型 | select | `conference` / `journal` / `review` / `other` |
 | `citekey` | citekey | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；不存原始 DOI |
-| `read_level` | 读法 | select | `扫` / `精读` |
 | `problem` | 问题域 | multi_select | 见 `reference-tags.md` |
 | `method` | 方法族 | multi_select | 同上 |
 | `data` | 数据类型 | multi_select | 同上 |
@@ -67,7 +66,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 | `borrowed_from` | 借自 | relation（自指） | 它借了谁的组件 |
 | `followers` | 追随者 | relation（自指） | 谁在跟着它做 |
 
-这些是地图层的判断，不是从论文里抄来的事实。单篇精读默认全部留空，正文状态写 `待回顾`；空字段不等于 `无对应潮`。只有用户在回顾中确认结论后才填写。`未定` 只用于用户已经把论文纳入回顾范围、但决定暂不确定角色的情形，不能用来代替 `待回顾`。
+这些是地图层的判断，不是从论文里抄来的事实。单篇 sounding 分析默认全部留空，正文状态写 `待回顾`；空字段不等于 `无对应潮`。只有用户在回顾中确认结论后才填写。`未定` 只用于用户已经把论文纳入回顾范围、但决定暂不确定角色的情形，不能用来代替 `待回顾`。
 
 自指的 relation 只连已有的行。用户已确认结论但目标论文还没入库时，先在笔记的 `## 定位` 里写，等它入库再连。状态定义、回顾与回写顺序见 `reference-wave.md`。
 
@@ -81,7 +80,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 ```
 缺字段：发表（概念 venue，应为 text）
-库里现有：标题、年份、读法、标签
+库里现有：标题、年份、标签
 建议：新建属性「发表」(text) 后重跑
 ```
 
@@ -147,15 +146,19 @@ Notion 是主库，Zotero 只承担"存 PDF 与书目信息"的角色。所以�
 
 **笔记里的 PDF 指针指向这个集合。** 正文头部写两条：`本地 PDF：<Zotero 附件的绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写散落在阅读文件夹里的临时路径——那个路径下次就不在了，而 `sounding` 里的附件才是这份 skill 维护的那一份。
 
+落库的是**重命名副本**：收到 PDF 先按 §2 的 `title` 规则生成重命名名，把副本存到 `zotero.data_dir` 下的 `zotero.collection` 目录（`config.local.json`，本机为 `<data_dir>\sounding`），`zotero_add.py --pdf` 传这个副本。副本文件名 = 重命名名 = Notion 页面 `标题`，三处一致。命名方案与判定（算法类 / 非算法类）见 `SKILL.md` 的「PDF 重命名副本」小节。
+
 ### 6.1 条目不存在时：建条目并挂 PDF
 
 ```bash
-python scripts/zotero_add.py --pdf "<绝对路径>" \
-  --title "<论文全称>" --authors "First Last;First Last" \
+python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
+  --title "<论文真实标题>" --authors "First Last;First Last" \
   --year 2026 --venue "AAAI" --type conference \
   --notion "<Notion URL>" \
   --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
 ```
+
+`--pdf` 传第 6.0 节生成的重命名副本（附件文件名即重命名名，脚本用 `basename` 取）；`--title` 仍是论文真实标题，作为 Zotero 的书目信息，区别于 Notion 的 `标题`（重命名名）——两者各司其职，不要混用。
 
 `--citekey` 省略时脚本优先保留既有键，仅新记录自动计算机器键；已有 Notion 记录时应传其采用的键以核对一致性。
 
@@ -198,12 +201,12 @@ python scripts/zotero_write.py --citekey <citekey> \
 
 正文仍由 Notion MCP 写入。首次发布前必须先按 `reference-notion.md` 完成 MCP 安装、schema 与读写探针；只读成功不够。随后检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
 
-1. 把已核对的裁图通过工具支持的上传方式上传，或使用用户已有的可访问托管地址。记录每张图的源 PDF 指纹、页码、裁图哈希和上传返回的标识；批量裁图清单可提供这些来源信息。
-2. 按正文位置插入图片并写属性。回读同一页面，核对 citekey、正文和图片块/文件引用；工具能预览时检查图像可见。
+1. 把已核对的裁图通过工具支持的上传方式上传，或使用用户已有的可访问托管地址。记录每张图的源 PDF 指纹、页码、裁图哈希和上传返回的标识；批量裁图清单可提供这些来源信息。多张图先批量申请上传槽，再以 3–4 个并发上传；单个响应失败只重试该图。
+2. 直接复用上传响应的 `markdown_source`，收齐后一次性按正文位置插入全部图片并写属性；不要为同一文件重复做 attachment 转换，也不要逐图插入、逐图回读。最后回读同一页面一次，核对 citekey、正文和全部图片块/文件引用；工具能预览时检查图像可见。
 3. 工具不支持上传、上传失败或只能核对块而不能确认图像时，明确记录缺失项。页面可先保存，任务状态保持「发布受阻（未完成）」，不宣称整篇已发布完成。不要为绕过上传而公开私人 PDF 或图片。
 4. 记录 Notion page ID 后再回写 Zotero。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
 
-`run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。
+`run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应、分段耗时与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。
 
 ---
 

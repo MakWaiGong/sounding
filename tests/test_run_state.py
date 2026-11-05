@@ -93,6 +93,19 @@ class RunStateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "readback_checked"):
             run_state.record_step(self.path, "notion_written", receipt)
 
+    def test_remote_timings_are_preserved_and_validated(self):
+        for step in ("pdf_prepared", "note_validated"):
+            run_state.record_step(self.path, step, self.receipt(step))
+        receipt = self.receipt("notion_written")
+        receipt["timings_ms"] = {"citekey_query": 1200, "page_write": 2400,
+                                  "readback": 1500}
+        run_state.record_step(self.path, "notion_written", receipt)
+        saved = run_state.load_state(self.path)["steps"]["notion_written"]["evidence"]
+        self.assertEqual(saved["timings_ms"]["page_write"], 2400)
+        receipt["timings_ms"] = {"page_write": -1}
+        with self.assertRaisesRegex(ValueError, "timings_ms"):
+            run_state.record_step(self.path, "notion_written", receipt)
+
     def test_publication_change_invalidates_remote_dependents(self):
         self.finish()
         receipt = self.receipt("notion_written")

@@ -1,6 +1,6 @@
 # Notion MCP：安装、配置、验收与发布阻塞
 
-Notion 是精读笔记的发布目标，不是可选导出格式。本地 `notes/` 只放工作稿、裁图、校验结果与运行记录；它不能代替 Notion 页面，也不能作为任务完成的依据。
+Notion 是 sounding 笔记的发布目标，不是可选导出格式。本地 `notes/` 只放工作稿、裁图、校验结果与运行记录；它不能代替 Notion 页面，也不能作为任务完成的依据。
 
 官方 Remote Notion MCP 地址固定为：
 
@@ -55,9 +55,9 @@ codex mcp login notion --no-browser
 
 ---
 
-## 3 安装验收：读写闭环
+## 3 工作区级安装验收：读写闭环
 
-安装 skill 或更换 Notion 工作区后，必须在正式精读前完成一次探针。全部通过才算 Notion 已配置：
+安装 skill 或更换 Notion 工作区后，必须在正式分析论文前完成一次探针。**探针属于工作区，不属于论文；缓存有效时绝不逐篇重跑。** 全部通过才算 Notion 已配置：
 
 1. **工具发现**：能看到 fetch、query、create、update，以及 delete／archive 能力。
 2. **认证**：工具不返回未连接、OAuth 过期或权限不足。
@@ -69,17 +69,47 @@ codex mcp login notion --no-browser
 
 记录每一步的真实 tool response、page ID 和清理结果。只做工具发现或只读 schema 不能证明发布链路可用。若客户端没有可恢复的删除／归档能力，在写探针前告诉用户会留下什么测试记录；不能清理时不要静默制造孤页。
 
+探针通过后把结果写进 `notes/notion-probe.json`，再记录工作区缓存：
+
+```bash
+python scripts/notion_workspace.py record --evidence notes/notion-probe.json
+python scripts/notion_workspace.py status
+```
+
+探针回执至少含当前 `database_id`、`data_source_id`、`probe_page_id`，以及值为 `true` 的 `read_checked`、`write_checked`、`update_checked`、`cleanup_checked`。脚本只核对并缓存 agent 已观察到的结果，不接触 Notion，也不能伪造探针成功。
+
+每篇发布开始只查本地缓存。仅在以下情况重跑探针：缓存不存在；数据库、data source、字段映射或选项配置变化；换工作区；实际 MCP 返回 OAuth、权限、schema 或写入错误。观察到这类错误时先执行：
+
+```bash
+python scripts/notion_workspace.py invalidate --reason "<实际错误>"
+```
+
+超时、单张图片上传失败或一次页面写入失败不自动等同于工作区失效；先按 page ID／citekey 回读并重试未完成子步骤。
+
 ---
 
-## 4 每篇笔记的发布验收
+## 4 每篇笔记的快速发布与验收
 
-精读笔记只有满足以下条件才算发布完成：
+工作区缓存有效后，逐篇路径保持短且可恢复：
+
+1. 本批次首次写入时 fetch 一次 data source schema；同一 data source、同一会话／批次内复用，出现 schema 错误才重新 fetch。
+2. 按 citekey 精确查询。批量论文的查询可并行；每篇仍单独判断零、一或多命中。
+3. 用一次 create/update 写属性与完整正文，不把正文拆成逐段远端调用。
+4. 所有裁图先在本地完成。批量申请上传槽，再以 3–4 个并发上传；保留每个响应返回的 `markdown_source`，不要为了同一文件再调用 attachment 转换。
+5. 收齐成功的图片引用后，用一次页面更新把图片放到正文对应位置；不要逐图执行“上传—插入—回读”。
+6. 最后只回读一次同一 page ID，统一核对 citekey、正文、字段与全部图片引用；失败时只续做缺失子步骤。
+
+不同论文的本地分析和图片上传可以并行；同一篇的幂等查询必须先于建页。并发调用逐项保存成功响应，不能因一个失败而丢掉其他已完成上传。
+
+sounding 笔记只有满足以下条件才算发布完成：
 
 - 按 citekey 精确查询后更新唯一行，或在零命中时新建一行；
 - 正文、属性和图片写入目标页面；
 - 回读同一 page ID，确认 citekey、正文、字段和图片引用；
 - 保存 Notion page ID／URL 的成功回执；
 - 再把该 URL 回写 Zotero `Extra`。
+
+Notion 与图片回执在 `timings_ms` 里分别记录实际毫秒耗时。至少区分 `schema_fetch`、`citekey_query`、`page_write`、`upload_slots`、`upload_bytes`、`images_attach`、`readback`；这组计时用于诊断，不改变完成标准。
 
 创建请求超时或返回状态不确定时，先按 citekey 和预期 page ID 回读，确认是否已创建；不要盲目重试造成重复行。
 
