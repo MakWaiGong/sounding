@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import config
 import check_config
+import setup as setup_script
 
 
 def fixture_config():
@@ -30,6 +31,15 @@ def fixture_schema():
 
 
 class ConfigTests(unittest.TestCase):
+    def test_notion_publication_requires_database_and_data_source(self):
+        self.assertEqual(setup_script.notion_ready({}),
+                         (False, ["papers_database_id", "papers_data_source_id"]))
+        self.assertEqual(setup_script.notion_ready({"papers_database_id": "db"}),
+                         (False, ["papers_data_source_id"]))
+        self.assertEqual(setup_script.notion_ready({
+            "papers_database_id": "db", "papers_data_source_id": "collection://ds"}),
+            (True, []))
+
     def test_partial_local_sections_keep_defaults_and_explicit_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             default = Path(tmp) / "defaults.json"

@@ -33,7 +33,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 | `venue` | 发表 | text | `Nature Methods`、`NeurIPS`，**不带年份** |
 | `year` | 年份 | number | 四位数字 |
 | `type` | 类型 | select | `conference` / `journal` / `review` / `other` |
-| `citekey` | citekey | text | 机器键：`sha1` 前 10 位 |
+| `citekey` | citekey | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；不存原始 DOI |
 | `read_level` | 读法 | select | `扫` / `精读` |
 | `problem` | 问题域 | multi_select | 见 `reference-tags.md` |
 | `method` | 方法族 | multi_select | 同上 |
@@ -53,7 +53,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 `verdict` 取速览第 10 行的「去留」，同一篇里必须一致。
 
-四个 relation **只连已经存在的页面**。页面不存在就留空，并在 `待查` 记一行；不要顺手新建孤页，孤页会把地图搅乱。
+四个 relation **只连已经存在的页面**。页面不存在就留空，并在 `待查` 记一行；不要顺手新建孤页，孤页会把地图搅乱。`潮` 与用于地图判断的 `课题组` 只在用户确认观潮结论后填写；单篇阶段的事实写进 `## 定位素材`，不提前转成 relation。
 
 ### 观潮字段（库里已有，按需填）
 
@@ -67,9 +67,9 @@ python scripts/check_config.py --schema-json notes/schema.json
 | `borrowed_from` | 借自 | relation（自指） | 它借了谁的组件 |
 | `followers` | 追随者 | relation（自指） | 谁在跟着它做 |
 
-这些是地图层的判断，不是从论文里抄来的事实。**没读透就不填**；判不出来就用 `未定`，不要留空装懂。
+这些是地图层的判断，不是从论文里抄来的事实。单篇精读默认全部留空，正文状态写 `待回顾`；空字段不等于 `无对应潮`。只有用户在回顾中确认结论后才填写。`未定` 只用于用户已经把论文纳入回顾范围、但决定暂不确定角色的情形，不能用来代替 `待回顾`。
 
-自指的 relation 只连已有的行。目标论文还没入库时，先在笔记的 `## 定位` 里写，等它入库再连。
+自指的 relation 只连已有的行。用户已确认结论但目标论文还没入库时，先在笔记的 `## 定位` 里写，等它入库再连。状态定义、回顾与回写顺序见 `reference-wave.md`。
 
 ---
 
@@ -95,7 +95,9 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 按 `citekey` 精确查，不要用标题模糊搜（同一篇的预印本与见刊版标题常常不同）。
 
-citekey 用来标识论文。新记录由 `scripts/citekey.py` 对规范化 DOI，或标题、一作姓、年份计算机器键，取 SHA-1 前 10 位；不要在别处重写算法。已有条目先沿用 `citationKey` 或 Extra 的 `Citation Key:`；已有笔记用 item key 时继续沿用。`zotero_add.py` 未传 `--citekey` 时优先保留找到的旧键，仅在新记录上生成键。补 DOI、改标题、重建附件不自动改已有键。
+DOI 是论文身份的首选来源，但不原样写进 citekey。原始 DOI 含 `/`，部分 DOI 还含括号、冒号或其他不适合 Windows 文件名、BibTeX key 与命令参数的字符；而本工程的 citekey 同时用于 Notion 幂等、本地工作文件名与 Zotero `Citation Key`。因此新记录由 `scripts/citekey.py` 对规范化 DOI，或无 DOI 时对标题、一作姓、年份计算机器键，取 SHA-1 前 10 位；不要在别处重写算法。
+
+已有条目先沿用 `citationKey` 或 Extra 的 `Citation Key:`；已有笔记用 item key 时继续沿用。`zotero_add.py` 未传 `--citekey` 时优先保留找到的旧键，仅在新记录上生成键。补 DOI、改标题、重建附件不自动改已有键。DOI 仍是查询别名和冲突核对依据，不因哈希而丢失。
 
 `paper_identity.py` 统一解析这些身份别名，按 DOI 比较时保留 DOI 中有意义的标点。多个条目命中同一身份即报歧义；旧字段与 Extra 冲突时也不任选一个。Notion 仍按最终采用的 citekey 精确查重，不用标题猜更新目标。
 
@@ -194,11 +196,11 @@ python scripts/zotero_write.py --citekey <citekey> \
 
 ### 6.3 Notion 图像与完成状态
 
-正文仍由 Notion MCP 写入。首次发布时先检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
+正文仍由 Notion MCP 写入。首次发布前必须先按 `reference-notion.md` 完成 MCP 安装、schema 与读写探针；只读成功不够。随后检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
 
 1. 把已核对的裁图通过工具支持的上传方式上传，或使用用户已有的可访问托管地址。记录每张图的源 PDF 指纹、页码、裁图哈希和上传返回的标识；批量裁图清单可提供这些来源信息。
 2. 按正文位置插入图片并写属性。回读同一页面，核对 citekey、正文和图片块/文件引用；工具能预览时检查图像可见。
-3. 工具不支持上传、上传失败或只能核对块而不能确认图像时，明确记录缺失项。笔记可先保存，图片保持待完成，不宣称整篇已发布完成。不要为绕过上传而公开私人 PDF 或图片。
+3. 工具不支持上传、上传失败或只能核对块而不能确认图像时，明确记录缺失项。页面可先保存，任务状态保持「发布受阻（未完成）」，不宣称整篇已发布完成。不要为绕过上传而公开私人 PDF 或图片。
 4. 记录 Notion page ID 后再回写 Zotero。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
 
 `run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。

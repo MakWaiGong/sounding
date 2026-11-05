@@ -1,6 +1,6 @@
 # 观潮 / Sounding
 
-**观潮**是远看：潮往哪走、推着哪些领域、各课题组站在哪一格。
+**观潮**是用户主导的远看：集中比较一批论文，决定潮往哪走、推着哪些领域、各课题组站在哪一格。
 **测深**是近看：放下铅锤，量清楚这一个点的深度。
 
 两个名字不是互译。一个命名宏观层，一个命名微观层，缺一个都不完整。
@@ -11,17 +11,18 @@
 | --- | --- |
 | 选 | 这一批里先读哪几篇，哪几篇只扫 |
 | 拆 | 这篇的结论靠什么立住，证据到哪为止 |
-| 放 | 它属于哪一波潮、第几代、谁在推 |
+| 放 | 横向比较这一批，由用户决定潮的边界、第几代、谁在推 |
 | 判 | 这个方向缺什么，缺的那一格可不可测 |
 
 模板是它的产物，不是它的定义。真正被规定的是判据：什么时候只该扫、什么时候必须精读、什么话在证据不足时不许写。
 
 ## 产物
 
-单篇读完产出一份笔记，一批读完产出三样东西：
+单篇读完先产出笔记与定位素材；一批回顾后再产出位置和方向判断：
 
 - **笔记** —— 含 10 行速览（几个月后只会重看这一段）、四种骨架之一（按论文结构选：conference 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / journal 三段式 / other 通用式 / scan 三行）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
-- **位置** —— 这篇在潮图上的哪一格：潮、世代、课题组（以通讯作者 + 机构 + 代码仓库为准）、开创了什么、置信度与推翻条件
+- **定位素材** —— 单篇只留可核对的能力变化、比较口径、课题组事实和前后作线索，状态为 `待回顾`；不自动判 wave
+- **位置** —— 回顾时由 agent 对齐多篇证据与候选划分，用户确认潮、世代、课题组、角色、开创性、证据强度与推翻条件后才回写
 - **判断** —— 这个方向缺什么，判据是什么，什么证据会推翻它
 
 四条贯穿全篇的规则：
@@ -35,7 +36,7 @@
 
 | 脚本 | 做什么 |
 | --- | --- |
-| `scripts/setup.py` | 首次配置：探测 Zotero 路径、写 key、认 Notion 库 |
+| `scripts/setup.py` | 首次配置：探测 Zotero 路径、写 key、认 Notion 库；缺 Notion 配置时返回失败 |
 | `scripts/check_config.py` | 离线体检，或对 MCP 导出的 schema 校验字段类型和 select 值 |
 | `scripts/citekey.py` | 为新记录计算机器键，旧键保持不变 |
 | `scripts/paper_identity.py` | 共用身份解析、DOI 别名与只读 SQLite 一致性快照 |
@@ -90,7 +91,7 @@ python -m pip install -e .
 python scripts/setup.py
 ```
 
-它问的只有这些，其余能探测就探测：
+skill 把官方 Remote Notion MCP 声明为必需依赖，地址是 `https://mcp.notion.com/mcp`。首次安装需完成 OAuth 和一次创建—回读—更新—清理探针；详细标准见 [reference-notion.md](reference-notion.md)。配置脚本问的只有这些，其余能探测就探测：
 
 | 要问的 | 怎么答 |
 | --- | --- |
@@ -98,7 +99,7 @@ python scripts/setup.py
 | Zotero API key | https://www.zotero.org/settings/keys 新建，勾 library + write（写子笔记再加 notes）。可以跳过 |
 | Notion Papers 库链接 | 粘整条 URL 即可 |
 
-`user_id` 由脚本拿 key 反查。跑完 `python scripts/setup.py --check` 能看到每一项的真实状态（数据库能读多少条、key 属于谁）。
+`user_id` 由脚本拿 key 反查。跑完 `python scripts/setup.py --check` 能看到本地配置状态（数据库能读多少条、key 属于谁）；它不会冒充 MCP 连通性测试。随后必须按 `reference-notion.md` 用真实 Notion 工具跑读写探针。
 
 ## 配置
 
@@ -145,17 +146,17 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `venue` | text | 刊名或会议名，不带年份 |
 | `year` | number | |
 | `type` | select | `conference` / `journal` / `review` / `other` |
-| `citekey` | text | 机器键（`sha1` 前 10 位），幂等主键 |
+| `citekey` | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；原始 DOI 只作身份与查询别名 |
 | `read_level` | select | `扫` / `精读` |
 | `problem` | multi-select | 问题域 |
 | `method` | multi-select | 方法族 |
 | `data` | multi-select | 数据类型 |
 | `verdict` | select | `值得跟进` / `存档` / `仅作背景` |
-| `topic` / `domain` / `wave` / `group` | relation | 选填，只在用户点名时连 |
-| `confidence` | select | `猜测` / `有据` / `复核`，观潮用 |
-| `role` | select | `创世` / `追随` / `旁支` / `方法件` / `未定`，观潮用 |
-| `generation` / `generation_name` / `opened` | relation / text / text | 世代与「从 X 变成 Y」，观潮用 |
-| `borrowed_from` / `followers` | relation | 借自谁、谁在跟，观潮用 |
+| `topic` / `domain` / `wave` / `group` | relation | 选填；`wave` 与地图层的 `group` 只在用户确认回顾结论后连接 |
+| `confidence` | select | `猜测` / `有据` / `复核`，用户确认定位后填写 |
+| `role` | select | `创世` / `追随` / `旁支` / `方法件` / `未定`，用户确认定位后填写 |
+| `generation` / `generation_name` / `opened` | relation / text / text | 世代与「从 X 变成 Y」，用户确认定位后填写 |
+| `borrowed_from` / `followers` | relation | 借自谁、谁在跟，用户确认定位后填写 |
 
 三族标签是三个独立的多选字段，因为 Notion 多选不支持嵌套。Zotero 侧标签是扁平的，靠 `p:` / `m:` / `d:` 前缀保留维度。
 
@@ -179,7 +180,9 @@ Notion 是主库，Zotero 只存 PDF 与书目信息。被本 skill 读过的条
 
 ## Notion 工具
 
-笔记的成品位置是 Notion 页面。Notion 工具不可用时才退回 `notes/<citekey>.md`，并告诉你待上传；写成功了就不在本地再留一份，两份必然分叉。
+笔记的成品位置是 Notion 页面，Notion MCP 是发布硬依赖。工具不可用时先安装或连接官方 Remote Notion MCP、完成 OAuth，并跑一次读写探针；不能把 `notes/<citekey>.md` 当作完成后的替代品。
+
+本地稿可以用于故障恢复，但此时任务必须标为「发布受阻（未完成）」。页面写入后要按同一 page ID 回读正文、属性和图片引用，成功后再把 Notion URL 回写 Zotero。
 
 ## 文件
 
@@ -193,7 +196,8 @@ reference-metrics.md     标准指标与统计术语表
 reference-tags.md        三族受控词表
 reference-library.md     字段映射、幂等、回写
 reference-engineering.md 缓存、批量裁图、机械校验、运行记录的命令约定
-reference-wave.md        观潮判据：潮、世代、课题组、开创了什么
+reference-notion.md      Notion MCP 安装、读写探针、发布完成与阻塞标准
+reference-wave.md        批量观潮：定位素材、候选划分、人工决策与回写
 reference-topic.md       课题页模板
 config.example.json      出厂默认
 config.local.json        你自己的副本（git 忽略）
@@ -213,6 +217,10 @@ pyproject.toml           Python 版本与依赖
 ```
 
 `reference-evidence.md` 存在的意义是规则只写一次：模板只放结构与验收，规则改了只改一处。
+
+## DOI 与 citekey
+
+DOI 足以作为论文身份的首选依据，但不适合原样承担本工程的 citekey。citekey 还要进入 Windows 文件名、命令参数、Notion 精确查重和 Zotero `Citation Key`；DOI 固定含 `/`，有些还含括号或冒号。因此新论文优先对规范化 DOI 计算稳定短键；没有 DOI 才使用标题、一作姓和年份。DOI 本身继续保存在书目元数据中，并可直接用于检索与冲突核对。
 
 ## 脚本
 
@@ -250,11 +258,11 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 ## 观潮
 
-单篇笔记回答「这篇做了什么」，观潮回答「这篇在整片潮里站在哪」。
+单篇笔记回答「这篇做了什么」，默认只留下 `## 定位素材`，状态为 `待回顾`。它不自动回答「属于哪波潮」，也不填写 wave、世代、角色或开创性字段。`待回顾` 与用户回顾后明确给出的 `无对应潮` 是两种不同状态。
 
-三条判据同时成立才算一波潮：有台阶、有迁移、有沉淀。缺哪条，就用缺的那条命名它（渐进线 / 单组自嗨 / 一时热闹）。世代、课题组、开创了什么，以及置信度与推翻条件，写法见 `reference-wave.md`。
+观潮是独立的批量回顾。agent 准备多篇对齐表、支持／反证／未知和候选划分；用户决定潮的边界与命名、是否分代、论文角色和哪些能力变化算开创。确认后 agent 再统一回写笔记、relation、潮页与反向关系。
 
-课题组以**通讯作者**为准：姓名取 PDF 首页的 correspondence 脚注或 † 标记，机构取其署名单位，代码仓库只写论文正文给出链接的那个。认组不等于认名单——名单会变，实验室不会。
+约 5–8 篇同主题待回顾材料、可能改写边界的新论文、既有潮无法容纳的新证据，或用户设定的定期节点，都可以触发一次回顾提醒，但不授权 agent 自动定位。能力台阶、群体迁移与公共沉淀是比较维度，不再是跨领域的硬门槛；完整流程见 `reference-wave.md`。
 
 ## License
 

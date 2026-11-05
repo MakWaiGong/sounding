@@ -14,6 +14,7 @@
   },
 
   "notion": {
+    "_mcp_comment": "Required publication target. Install/connect the official Remote Notion MCP at https://mcp.notion.com/mcp, complete OAuth, then run the read-write probe in reference-notion.md. A local note is not a completed fallback.",
     "papers_database_id": "",
     "papers_data_source_id": "",
 

@@ -4,9 +4,12 @@
     seed = "doi:" + norm(doi)                     when a DOI exists
            "title:" + norm(title) | norm(surname) | year    otherwise
 
-Why a hash and not Zotero's item key: the Zotero library is a backup that can be
-rebuilt. A hash recomputed from DOI or title joins the rebuilt item to the same
-Notion row; an item key would not, because Zotero mints a new one on import.
+Why a hash instead of the raw DOI or Zotero's item key: DOI is the preferred
+bibliographic identity, but contains '/' and may contain characters that are
+unsafe in filenames, BibTeX keys, and command arguments. The Zotero library is a
+backup that can be rebuilt. A hash recomputed from DOI or title joins the rebuilt
+item to the same Notion row; an item key would not, because Zotero mints a new one
+on import.
 
 The key is deliberately unreadable. What you read is the title; the key only has
 to be unique, stable, and computable by both sides.

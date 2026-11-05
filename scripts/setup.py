@@ -94,7 +94,14 @@ def ask(prompt, current=None, secret=False):
     return val or current or ""
 
 
-def main():
+def notion_ready(notion):
+    """Return publication-config readiness; MCP connectivity is tested by the agent."""
+    missing = [name for name in ("papers_database_id", "papers_data_source_id")
+               if not notion.get(name)]
+    return not missing, missing
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--zotero-db")
     ap.add_argument("--zotero-data")
@@ -104,7 +111,7 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--yes", action="store_true", help="accept detected values, ask nothing")
     ap.add_argument("--skip-key-check", action="store_true")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     # Start from whatever is already there so a re-run never loses values.
     cfg_path = config.config_path()
@@ -134,7 +141,10 @@ def main():
         print(f"notion db   : {n.get('papers_database_id') or '(empty)'}")
         print(f"data source : {n.get('papers_data_source_id') or '(empty)'}")
         print(f"properties  : {len(n.get('properties', {}))} mapped")
-        return
+        ready, missing = notion_ready(n)
+        print("publication : " + ("CONFIGURED -- still run the MCP read-write probe"
+                                  if ready else "BLOCKED -- missing " + ", ".join(missing)))
+        return 0 if ok and ready else 1
 
     # --- Zotero database -------------------------------------------------
     db = a.zotero_db or z.get("db_path")
@@ -187,7 +197,7 @@ def main():
         n["papers_database_id"] = dbid
         print(f"notion db  : {dbid}")
     else:
-        print("notion db  : not set -- notes go to notes/<citekey>.md until this is filled")
+        print("notion db  : not set -- publication is BLOCKED; a local draft is not completion")
 
     if a.notion_ds:
         n["papers_data_source_id"] = a.notion_ds
@@ -203,14 +213,18 @@ def main():
     if not z.get("api_key"):
         todo.append("zotero.api_key -- Zotero write-back is off until this is set")
     if not n.get("papers_database_id"):
-        todo.append("notion.papers_database_id -- notes stay local until this is set")
+        todo.append("notion.papers_database_id -- required; publication remains blocked")
     if not n.get("papers_data_source_id"):
-        todo.append("notion.papers_data_source_id -- fill from the database's collection:// url "
-                    "(the Notion tools report it when you open the database)")
+        todo.append("notion.papers_data_source_id -- required; fetch the database and copy its "
+                    "collection:// URL")
     print("still to do:" if todo else "everything needed is set.")
     for t in todo:
         print(f"  - {t}")
+    ready, _ = notion_ready(n)
+    if ready:
+        print("next: run the Notion MCP create-read-update-delete probe in reference-notion.md")
+    return 0 if ready else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
