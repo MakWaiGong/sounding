@@ -164,7 +164,7 @@ def probe(client, app_token, table_id, folder):
         ok &= say(False, "probe search", f"{e.code} {e.msg}")
 
     try:
-        client.update_record(app_token, table_id, rid, {"去留": "存档"})
+        client.update_record(app_token, table_id, rid, {"读法": "精读"})
         ok &= say(True, "probe record updated")
     except fapi.FeishuError as e:
         ok &= say(False, "probe record update", f"{e.code} {e.msg}")

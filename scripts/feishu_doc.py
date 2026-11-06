@@ -486,6 +486,25 @@ def replace_body(client, doc_id, md, figures=()):
     return doc_id
 
 
+def orphan_figure_files(note_path, figures_root=None):
+    """Cropped PNGs sitting in notes/figs/<citekey>/ without a manifest.json.
+
+    ``note_figures`` returns ``[]`` when the manifest is absent, so publishing
+    would silently ship a figure-less note. The publish step calls this first to
+    turn that silence into a stop.
+    """
+    citekey = os.path.splitext(os.path.basename(note_path))[0]
+    root = figures_root or os.path.join(os.path.dirname(os.path.abspath(note_path)), "figs")
+    folder = os.path.join(root, citekey)
+    if not os.path.isdir(folder) or os.path.exists(os.path.join(folder, "manifest.json")):
+        return []
+    return sorted(
+        os.path.join(folder, name)
+        for name in os.listdir(folder)
+        if name.lower().endswith(".png")
+    )
+
+
 def note_figures(note_path, figures_root=None):
     """(path, caption, label) triples from notes/figs/<citekey>/manifest.json.
 

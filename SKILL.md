@@ -252,7 +252,7 @@ citekey：zhangSpatialAtlas2024
 
 两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（已配置 Zotero 时：`Extra` 写 `<后端名>: <url>`，即 `Notion: <url>` 或 `Feishu: <url>`，数据类型标签加 `d:` 前缀（领域由用户在云端表手填，脚本不写）；未配置 Zotero 时跳过此步，笔记里 PDF 指针指向用户指定目录）。
 
-发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。主图用 `scripts/fig_upload.py crop` 裁完再上传：Notion 后端走 MCP 上传 + `fig_upload.py tag` 出标签（三步硬依赖，未上传则 tag 报错，见 `reference-library.md` §6.3）；飞书后端由 `scripts/publish.py` 直接按 `notes/figs/<citekey>/manifest.json` 上传，不需要 tag 一步。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
+发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。主图用 `scripts/fig_upload.py crop` 裁完再上传：Notion 后端走 MCP 上传 + `fig_upload.py tag` 出标签（三步硬依赖，未上传则 tag 报错，见 `reference-library.md` §6.3）；飞书后端由 `scripts/publish.py` 直接按 `notes/figs/<citekey>/manifest.json` 上传，不需要 tag 一步。**没有 `manifest.json` 就没有图**：目录里已有裁图却没有 manifest 时，`publish.py` 会停下报错而不是发一篇无图笔记——补齐 manifest 再重发。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
 
 **回读成功才算发布。** 本地稿、schema 离线校验、工具发现、`code: 0` 或写入请求已发出，都不能单独证明落库完成：Notion 按 page ID 回读，飞书按 `raw_content` + 图片块 + 表格数回读（见 `reference-feishu.md` §2）。
 

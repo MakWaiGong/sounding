@@ -331,6 +331,14 @@ def main():
             timings["doc_create"] = round((time.time() - started) * 1000)
 
         started = time.time()
+        orphans = fdoc.orphan_figure_files(note_path)
+        if orphans:
+            names = "、".join(os.path.basename(p) for p in orphans)
+            sys.exit(
+                f"缺 notes/figs/{props['citekey']}/manifest.json，目录里却有裁图：{names}。"
+                "这些图不会上传，先跑 `python scripts/fig_upload.py crop <pdf> "
+                f"--citekey {props['citekey']} --fig …` 生成 manifest 再发布"
+            )
         figures = fdoc.note_figures(note_path)
         # Pass the full note so replace_body can render the 速览 callout plus the
         # body; the table count check below still uses props["body"].
