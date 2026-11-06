@@ -220,6 +220,11 @@ class FeishuClient:
         return self.patch(f"/open-apis/drive/v2/permissions/{token}/public",
                           {"link_share_entity": level}, params={"type": doc_type})
 
+    def grant_public_access(self, token, doc_type="docx", level="anyone_readable"):
+        """Let anyone with the link open the file, even outside the org."""
+        return self.patch(f"/open-apis/drive/v2/permissions/{token}/public",
+                          {"link_share_entity": level}, params={"type": doc_type})
+
     # -- docx -------------------------------------------------------------
 
     def create_doc(self, title, folder=""):

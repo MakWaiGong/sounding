@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -96,6 +96,26 @@ class PublishNoteTests(unittest.TestCase):
         first = publish.parse_note(str(self.path))["rev"]
         self.path.write_text(NOTE.replace("正文。", "正文，改过。"), encoding="utf-8")
         self.assertNotEqual(first, publish.parse_note(str(self.path))["rev"])
+
+    def test_migration_line_goes_under_the_source_heading(self):
+        text = NOTE + "\n## 定位素材\n\n原文：某文 · Nature 2020 · DOI 10.1038/x\n"
+        out = publish.mark_migrated(text, "Notion", "飞书", today="2026-11-07")
+        self.assertIn("迁移：2026-11-07 从 Notion 迁入；主后端 = 飞书", out)
+        # directly under the heading, before 原文
+        self.assertLess(out.index("## 定位素材"), out.index("迁移："))
+        self.assertLess(out.index("迁移："), out.index("原文："))
+
+    def test_migration_line_is_rewritten_not_stacked(self):
+        text = NOTE + "\n## 定位素材\n\n迁移：2026-01-01 从 飞书 迁入；主后端 = 飞书\n"
+        first = publish.mark_migrated(text, "Notion", "飞书", today="2026-11-07")
+        second = publish.mark_migrated(first, "Notion", "飞书", today="2026-11-08")
+        self.assertEqual(second.count("迁移："), 1)
+        self.assertIn("2026-11-08", second)
+
+    def test_migration_line_creates_the_section_when_absent(self):
+        out = publish.mark_migrated(NOTE, "飞书", "飞书", today="2026-11-07")
+        self.assertIn("## 定位素材", out)
+        self.assertIn("迁移：2026-11-07 从 飞书 迁入；主后端 = 飞书", out)
 
 
 if __name__ == "__main__":

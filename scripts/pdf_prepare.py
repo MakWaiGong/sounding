@@ -20,7 +20,10 @@ import re
 import sys
 import tempfile
 
-import fitz
+try:  # PyMuPDF >= 1.24 exposes the same API as `pymupdf`
+    import pymupdf as fitz
+except ImportError:  # older releases only ship the `fitz` alias
+    import fitz
 
 
 SCHEMA_VERSION = 1

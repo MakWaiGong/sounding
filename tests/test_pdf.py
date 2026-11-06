@@ -12,7 +12,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-import fitz
+try:  # keep the same module object the scripts patch
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))

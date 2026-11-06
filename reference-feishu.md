@@ -23,9 +23,10 @@ python scripts/publish.py notes/<citekey>.md \
 1. 解析笔记头四行（`标题` / `发表` / `类型` / `citekey`）、`## 定位素材` 里 `原文：` 行的 DOI，速览第 1 行起的编号行；`发表` 末尾的 `(2026)` 是年份，`年份` 字段由它派生。`去留` 不再进表，只留在笔记速览第 10 行。
 2. 按 citekey **精确**查 `Papers`：1 行更新、0 行新建、多行停下报 record_id（`reference-library.md` §4）。
 3. 有记录就复用 `notes/.feishu-index.json` 里的 doc_id，先清空正文再整篇重写——笔记是重建的，不是打补丁。
-4. 图从 `notes/figs/<citekey>/manifest.json` 取，内联到正文首次提及 `Fig. N` 的位置（跳过 `Extended Data` / `Supplementary`，没被提到的落文末）。
+4. 图从 `notes/figs/<citekey>/manifest.json` 取，插到**解释它的那段叙述之后**：先剔除不叙述的行（`PDF 与来源`、速览、符号表、指标、与已读的关系、待查、定位素材、实验清单、参考文献、表格行、代码块），再取该图第一个可用提及所在段落/列表项的末尾插入；同一段提到多张图时按提及顺序分散，后一张顺延到下一次叙述提及，正文完全没提的图落文末（`Extended Data` / `Supplementary` 的提及跳过）。
 5. 回读：`raw_content` 文本长度、块数、图片块数、表格数四项都要对上，否则非零退出。
 6. 通过后写索引（doc_id / url / record_id / rev）与表格里的 `笔记` 链接字段。
+7. 把文档设成公开只读：`PATCH /open-apis/drive/v2/permissions/{doc}/public?type=docx`，`{"link_share_entity": "anyone_readable"}`（`FeishuClient.grant_public_access`）。**应用是文档所有者，用户在多维表格「分享」里改不了链接范围**（会提示「你无权编辑部分设置」），只能由应用用 API 设；base 也同理（`type=bitable`）。默认 `anyone_readable`（任何人拿链接可看），不要用 `tenant_*`（组织内限定）。
 
 `rev` 是笔记 md 的 sha1 前 12 位；同一份笔记重跑是幂等的，改过内容重跑会覆盖同一篇文档。
 
@@ -54,7 +55,7 @@ python scripts/feishu_setup.py --probe --apply   # 记录 CRUD + 文档写入 + 
 - **公式**：笔记里直接写 `$...$`（行内）或 `$$...$$`（独占一行）。`blocks/convert` 会把它转成 text 块里的 equation 元素（`{"equation": {"content": ...}}`），不需要新块类型；表格 cell、callout 首行、图注都走同一个 `inline_elements` 切分。
 - **图注**：`manifest.json` 每张图可加一条 `图注：Fig. N —— <解释>` 写在 `## 定位素材` 下，渲染成图片正下方的灰色斜体 text 块（`text_color: 7`），块内容形如 `Fig. N　<解释>（原 PDF 第 N 页）`；没有图注就只写 `Fig. N（原 PDF 第 N 页）`。图注行不会重复进正文。
 - **标题着色**：convert 出的 heading 块做后处理，给每个 text_run 设 `text_element_style.text_color`——H1/H2=蓝 5、H3=紫 6、H4=灰 7。
-- **图内联**：按每个 fig 的 `Fig. N` / `Figure N` 首次提及插位（`Extended Data Fig.` / `Supplementary` 跳过），同一行提多张就按提及顺序依次插，没被提到的落文末。
+- **图内联**：按每个 fig 的 `Fig. N` / `Figure N` **叙述提及**插位——非叙述行（`PDF 与来源`/速览/符号表/指标/与已读的关系/待查/定位素材/实验清单/参考文献/表格行/代码块）里的提及一律不作锚点，图插在提及所在段落或列表项的末尾；同一段提到多张图时按提及顺序分散到各自叙述处，不堆叠；`Extended Data Fig.` / `Supplementary` 跳过，正文没提过的图落文末。
 - **表格不能从 convert 结果直接插**（`1770029 block not support to create`）。表格一律自己建空表（`block_type 31`，`row_size` / `column_size` / `header_row`），再用 `blocks/batch_update` 一次性把 `R*C` 个 cell 里自带的空 text 块改掉。**单次建表 `row_size` 上限 9**（≥10 报 `1770001`）；更大的表先建 9 行，再用一次 `batch_update` 的 `insert_table_row` 补齐。
 - 图片三步，缺一步就是空白块：建空图片块（`block_type 27`）→ `medias/upload_all`（`parent_type=docx_image`、`parent_node` = **图片块 id**、`extra.drive_route_token` = 文档 id）→ `PATCH` 块 `{"replace_image": {"token": <file_token>}}`。
 - 清正文用 `children/batch_delete`（`start_index 0`，`end_index` 给超过实际块数的值也接受）。

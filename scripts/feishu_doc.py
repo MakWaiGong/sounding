@@ -63,6 +63,7 @@ _DIGEST = re.compile(r"^(\d{1,2})\.\s+(.+)$")
 _VERDICT = re.compile(r"去留[：:]\s*([^\s。]+)")
 _FIG_LABEL = re.compile(r"^fig(?:ure)?_?(\d+)", re.I)
 _FIG_REF = re.compile(r"Fig(?:ure)?\.?\s*(\d+)", re.I)
+_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 
 
 def clean_markdown(md):
@@ -326,30 +327,98 @@ def _append_digest_callout(client, doc_id, digest):
     return callout_id
 
 
-def _first_fig_mention(lines, num):
-    """``(line_index, char_pos)`` of the first ``Fig. N`` mention, skipping
-    ``Extended Data`` / ``Supplementary`` references."""
+def _fig_mentions(lines, num, allowed=None):
+    """Every ``(line_index, char_pos, char_end)`` of ``Fig. N`` in narrative prose,
+    skipping ``Extended Data`` / ``Supplementary`` references."""
+    hits = []
     for i, line in enumerate(lines):
+        if allowed is not None and i not in allowed:
+            continue
         for m in _FIG_REF.finditer(line):
             if m.group(1) != num:
                 continue
             before = line[: m.start()].lower()
             if "extended data" in before[-20:] or "supplementary" in before[-20:]:
                 continue
-            return (i, m.start())
-    return None
+            hits.append((i, m.start(), m.end()))
+    return hits
+
+
+def _first_fig_mention(lines, num, allowed=None):
+    """First narrative ``(line_index, char_pos)`` for ``Fig. N`` or ``None``."""
+    hits = _fig_mentions(lines, num, allowed)
+    return (hits[0][0], hits[0][1]) if hits else None
+
+
+# Sections that describe the note or list facts; a figure must not be anchored to
+# the mentions inside them (PDF pointer lists, evidence tables, caption source).
+_NON_NARRATIVE_SECTIONS = {
+    "PDF 与来源", "速览", "符号表", "指标", "与已读的关系", "待查",
+    "定位素材", "实验清单", "参考文献",
+}
+
+
+def _narrative_indices(lines):
+    """Indices of lines that belong to narrative prose.
+
+    Excludes fenced code (the 论证地图 diagram), table rows, and the sections in
+    ``_NON_NARRATIVE_SECTIONS``: a ``Fig. N`` there is a citation, not the
+    paragraph a reader expects the image to sit next to.
+    """
+    allowed = set()
+    section = ""
+    in_code = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        if line.startswith("## "):
+            section = line[3:].strip()
+            continue
+        if section in _NON_NARRATIVE_SECTIONS:
+            continue
+        if stripped.startswith("|"):
+            continue
+        allowed.add(i)
+    return allowed
+
+
+def _block_end(lines, index, allowed=None):
+    """Last line of the paragraph or list item that starts at ``index``.
+
+    A figure lands after the prose that explains it instead of splitting a
+    sentence or jumping to the end of a numbered list.
+    """
+    last = index
+    for j in range(index + 1, len(lines)):
+        stripped = lines[j].strip()
+        if not stripped or lines[j].startswith("#"):
+            break
+        if allowed is not None and j not in allowed:
+            break
+        if _LIST_ITEM.match(lines[j]):
+            break
+        last = j
+    return last
 
 
 def _append_body(client, doc_id, body, figures):
-    """Write the body, dropping each figure in right after its first mention.
+    """Write the body, dropping each figure right after the paragraph that
+    narrates it.
 
-    ``figures`` is an iterable of ``(path, caption, label)``. Figures whose
-    first mention shares a line are all inserted there, in mention order; any
-    figure whose number is never mentioned falls back to the end.
+    ``figures`` is an iterable of ``(path, caption, label)``. An anchor is only
+    a mention inside narrative prose (``_narrative_indices``); figures whose
+    mention sits in a table, a diagram or a metadata section are anchored at the
+    paragraph that actually discusses them, and any figure never mentioned in
+    prose falls back to the end. Figures sharing a paragraph keep mention order.
     """
     lines = body.splitlines()
     # 图注 lines feed the caption under each figure; they are not body prose.
     lines = [line for line in lines if not _FIG_CAPTION.match(line.strip())]
+    allowed = _narrative_indices(lines)
     by_num = {}
     for path, caption, label in figures:
         m = _FIG_LABEL.match(label)
@@ -358,13 +427,20 @@ def _append_body(client, doc_id, body, figures):
 
     insertions = []  # (line_index, char_pos, path, caption)
     placed = set()
+    used_lines = set()
     for num in by_num:
-        anchor = _first_fig_mention(lines, num)
-        if anchor is not None:
-            line_idx, char_pos = anchor
-            path, caption = by_num[num][0]
-            insertions.append((line_idx, char_pos, path, caption))
-            placed.add(num)
+        path, caption = by_num[num][0]
+        anchor = None
+        for i, pos, _end in _fig_mentions(lines, num, allowed):
+            if i not in used_lines:
+                anchor = (i, pos)
+                break
+        if anchor is None:
+            continue
+        line_idx, char_pos = anchor
+        used_lines.add(line_idx)
+        insertions.append((_block_end(lines, line_idx, allowed), char_pos, path, caption))
+        placed.add(num)
     insertions.sort(key=lambda item: (item[0], item[1]))
 
     by_line = {}

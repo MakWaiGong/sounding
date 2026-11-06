@@ -22,7 +22,10 @@ import json
 import sys
 from pathlib import Path
 
-import fitz
+try:  # PyMuPDF >= 1.24 exposes the same API as `pymupdf`
+    import pymupdf as fitz
+except ImportError:  # older releases only ship the `fitz` alias
+    import fitz
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 NOTES_DIR = SKILL_DIR / "notes"

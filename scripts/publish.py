@@ -1,4 +1,4 @@
-﻿"""Publish one sounding note into the Feishu library, idempotent by citekey.
+"""Publish one sounding note into the Feishu library, idempotent by citekey.
 
     python scripts/publish.py notes/<citekey>.md
     python scripts/publish.py notes/<citekey>.md --data PDB,AlphaFold-DB
@@ -14,6 +14,8 @@ What it does, in order:
 3. writes the doc body and figures, replacing whatever was there
 4. reads the document back and refuses to call a write finished without it
 5. optionally writes ``Feishu: <url>`` and the ``d:`` data-family tags back to Zotero
+6. with ``--mark-migrated``, records in 定位素材 that the note moved here from the
+   other backend (``reference-library.md`` §6.4); the marker travels into the doc
 
 Required properties missing from the note are a stop, not a silent gap: the
 report names the concept and the field (``reference-library.md`` §3).
@@ -43,6 +45,8 @@ HEADER = re.compile(r"^(标题|发表|类型|citekey|年份|本地 PDF|Zotero)\s
 YEAR_AT_END = re.compile(r"\((\d{4})\)\s*$")
 VERDICT = re.compile(r"去留[：:]\s*([^\s。]+)")
 DOI = re.compile(r"10\.\d{4,9}/[^\s·，,;；]+")
+MIGRATION = re.compile(r"^迁移[：:]\s*.+$", re.M)
+SOURCE_HEADING = re.compile(r"^##\s*定位素材\s*$", re.M)
 TYPES = ("algorithm", "science", "review", "other")
 
 
@@ -116,6 +120,45 @@ def parse_note(path):
         "body": body,
         "rev": hashlib.sha1(text.encode("utf-8")).hexdigest()[:12],
     }
+
+
+def mark_migrated(text, source, target, today=None):
+    """Put one migration line inside 定位素材; a rerun rewrites it, never stacks.
+
+    The line lives in the note (not only in the index) because the note is the
+    only thing both backends share, and it travels into the document body.
+    """
+    today = today or time.strftime("%Y-%m-%d")
+    line = f"迁移：{today} 从 {source} 迁入；主后端 = {target}"
+    if MIGRATION.search(text):
+        return MIGRATION.sub(line, text, count=1)
+    heading = SOURCE_HEADING.search(text)
+    if heading is None:
+        return text.rstrip("\n") + f"\n\n## 定位素材\n\n{line}\n"
+    return text[:heading.end()] + f"\n{line}\n" + text[heading.end():]
+
+
+def old_backend_from_zotero(props):
+    """Which backend the existing link points at, judged by the Extra lines."""
+    import zotero_write as zw
+
+    cfg = config.load()
+    base, user_id, api_key = config.zotero_api(cfg)
+    if not user_id or not api_key:
+        return None
+    key, _ = zw.item_key_from_citekey(props["citekey"], cfg, props.get("title"),
+                                      props.get("alt_titles") or ())
+    if not key:
+        return None
+    status, _, item = zw.request("GET", f"{base}/users/{user_id}/items/{key}", api_key)
+    if status != 200 or not isinstance(item, dict):
+        return None
+    extra = (item.get("data") or {}).get("extra") or ""
+    if "Notion:" in extra:
+        return "Notion"
+    if "Feishu:" in extra:
+        return "飞书"
+    return None
 
 
 def missing(props, tags):
@@ -215,6 +258,8 @@ def main():
     ap.add_argument("--allow-partial", action="store_true",
                     help="write even when a required property is missing")
     ap.add_argument("--zotero", action="store_true", help="write the link and tags back")
+    ap.add_argument("--mark-migrated", nargs="?", const="auto", metavar="旧后端",
+                    help="在定位素材写一行迁移标记（notion / 飞书）；省略值则从 Zotero 推断")
     ap.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
     args = ap.parse_args()
 
@@ -223,6 +268,18 @@ def main():
         sys.exit(f"no such note: {note_path}")
     root = root_of(note_path)
     props = parse_note(note_path)
+    if args.mark_migrated is not None:
+        source = args.mark_migrated
+        if source == "auto":
+            source = old_backend_from_zotero(props)
+        if not source:
+            sys.exit("--mark-migrated 需要旧后端名（如 --mark-migrated notion）；自动推断失败")
+        with open(note_path, encoding="utf-8", newline="") as f:
+            text = f.read()
+        with open(note_path, "w", encoding="utf-8", newline="") as f:
+            f.write(mark_migrated(text, source, "飞书"))
+        props = parse_note(note_path)
+        print(f"迁移标记：从 {source} 迁入，主后端 = 飞书", file=sys.stderr)
     split = lambda s: [p.strip() for p in (s or "").split(",") if p.strip()]
     tags = {"data": split(args.data), "read": args.read}
 
@@ -281,7 +338,7 @@ def main():
         timings["body_write"] = round((time.time() - started) * 1000)
 
         url = fc.doc_url(doc_id)
-        fc.grant_tenant_access(doc_id)
+        fc.grant_public_access(doc_id)
 
         fields = record_fields(props, tags, url)
         record_id = rows[0].get("record_id") if rows else None
