@@ -107,6 +107,25 @@ def notion(cfg=None):
     return n
 
 
+def feishu(cfg=None):
+    """Return the feishu section, with env overrides applied.
+
+    The app secret is a secret: it belongs in config.local.json (git-ignored) or
+    FEISHU_APP_SECRET, never in config.example.json or in a script.
+    """
+    cfg = load() if cfg is None else cfg
+    f = dict(cfg.get("feishu", {}))
+    for env_key, field in (("FEISHU_APP_ID", "app_id"),
+                           ("FEISHU_APP_SECRET", "app_secret"),
+                           ("FEISHU_API_BASE", "api_base"),
+                           ("FEISHU_DOMAIN", "domain"),
+                           ("FEISHU_BASE_APP", "base_app_token")):
+        val = os.environ.get(env_key)
+        if val:
+            f[field] = val
+    return f
+
+
 def property_map(cfg=None):
     """Concept name -> the user's actual Notion field name."""
     return dict(notion(cfg).get("properties", {}))

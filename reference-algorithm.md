@@ -1,4 +1,4 @@
-# Conference template — four parts
+﻿# algorithm template — four parts
 
 Used when Figure 1 is a module diagram and the paper argues with one headline table. The order is the argument; do not reorder.
 

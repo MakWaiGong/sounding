@@ -29,17 +29,15 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 | 概念 | 字段 | 类型 | 值 |
 | --- | --- | --- | --- |
-| `title` | 标题 | title | 重命名名（算法类「方法名：一句话灵感」；非算法类「一句话中文核心发现」）；与 PDF 副本文件名一致，见 §6.0 |
+| `title` | 标题 | title | 重命名名（算法类「方法名：一句话灵感」；science·review 类「一句话中文核心发现」）；与 PDF 副本文件名一致，见 §6.0 |
 | `venue` | 发表 | text | `Nature Methods`、`NeurIPS`，**不带年份** |
 | `year` | 年份 | number | 四位数字 |
-| `type` | 类型 | select | `conference` / `journal` / `review` / `other` |
+| `type` | 类型 | select | `algorithm` / `science` / `review` / `other`（骨架名，不是发表处；判定见 `SKILL.md` §3） |
 | `citekey` | citekey | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；不存原始 DOI |
-| `problem` | 问题域 | multi_select | 见 `reference-tags.md` |
-| `method` | 方法族 | multi_select | 同上 |
-| `data` | 数据类型 | multi_select | 同上 |
-| `verdict` | 去留 | select | `值得跟进` / `存档` / `仅作背景` |
+| `data` | 数据类型 | multi_select | 见 `reference-tags.md` |
+| `doi` | DOI | text | `10.xxxx/xxxx`，从 `## 定位素材` 的 `原文：` 行取；没有就不写，不报错 |
 
-`check_config.py` 把 `verdict` 也算必填。理由：速览第 10 行每次都要写，字段空着等于索引丢了这一维。若你的库确实不想要这一列，把它从 `scripts/check_config.py` 的 `REQUIRED` 移到 `OPTIONAL`。
+`去留`（`值得跟进` / `存档` / `仅作背景`）只活在笔记的速览第 10 行，不进库表，`check_config.py` 也不检查它。`置信度` 已从表里删掉。
 
 ### 选填：有就填，没有不报错
 
@@ -50,7 +48,7 @@ python scripts/check_config.py --schema-json notes/schema.json
 | `wave` | 潮 | relation | 已有潮页 |
 | `group` | 课题组 | relation | 已有组页 |
 
-`verdict` 取速览第 10 行的「去留」，同一篇里必须一致。
+`DOI` 从 `## 定位素材` 的 `原文：<论文真名> · <发表> <年> · DOI 10.xxxx/xxxx` 一行取；缺 DOI 时表里留空，发布不中断。
 
 四个 relation **只连已经存在的页面**。页面不存在就留空，并在 `待查` 记一行；不要顺手新建孤页，孤页会把地图搅乱。`潮` 与用于地图判断的 `课题组` 只在用户确认观潮结论后填写；单篇阶段的事实写进 `## 定位素材`，不提前转成 relation。
 
@@ -58,7 +56,6 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 | 概念 | 字段 | 类型 | 值 |
 | --- | --- | --- | --- |
-| `confidence` | 置信度 | select | `猜测` / `有据` / `复核` |
 | `role` | 角色 | select | `创世` / `追随` / `旁支` / `方法件` / `未定` |
 | `generation` | 世代 | relation（自指） | 指向定义这一代的那篇 |
 | `generation_name` | 世代名 | text | 这一代的名字 |
@@ -112,12 +109,12 @@ DOI 是论文身份的首选来源，但不原样写进 citekey。原始 DOI 含
 
 ## 5 标签
 
-三族三个独立的多选字段，不是一列。
+数据类型一个多选字段。领域不在这里：它是用户在云端表里手填的链接列，skill 不写不查。
 
 - 词表在 `reference-tags.md`：小写英文、短语内连字符、不用复数、不用同义词。
 - **先复用再新建。** 建之前跑 `zotero_find.py --tags` 看库里实际在用什么。`scRNA` / `single-cell` / `单细胞` 三个并存，等于整库检索废掉。
-- 每族一到三个。选了五个，说明这篇没聚焦，回摘要重判。
-- 一族超过约 40 个选项，说明这个标签太细；它的位置在正文里，不在字段里。
+- 一到三个。选了五个，说明这篇没聚焦，回摘要重判。
+- 超过约 40 个选项，说明这个标签太细；它的位置在正文里，不在字段里。
 
 ---
 
@@ -146,7 +143,7 @@ Notion 是主库，Zotero 只承担"存 PDF 与书目信息"的角色。所以�
 
 **笔记里的 PDF 指针指向这个集合。** 正文头部写两条：`本地 PDF：<Zotero 附件的绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写散落在阅读文件夹里的临时路径——那个路径下次就不在了，而 `sounding` 里的附件才是这份 skill 维护的那一份。
 
-落库的是**重命名副本**：收到 PDF 先按 §2 的 `title` 规则生成重命名名，把副本存到 `zotero.data_dir` 下的 `zotero.collection` 目录（`config.local.json`，本机为 `<data_dir>\sounding`），`zotero_add.py --pdf` 传这个副本。副本文件名 = 重命名名 = Notion 页面 `标题`，三处一致。命名方案与判定（算法类 / 非算法类）见 `SKILL.md` 的「PDF 重命名副本」小节。
+落库的是**重命名副本**：收到 PDF 先按 §2 的 `title` 规则生成重命名名，把副本存到 `zotero.data_dir` 下的 `zotero.collection` 目录（`config.local.json`，本机为 `<data_dir>\sounding`），`zotero_add.py --pdf` 传这个副本。副本文件名 = 重命名名 = Notion 页面 `标题`，三处一致。命名方案与判定（算法类 / science · review 类）见 `SKILL.md` 的「PDF 重命名副本」小节。
 
 ### 6.1 条目不存在时：建条目并挂 PDF
 
@@ -155,14 +152,14 @@ python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
   --title "<论文真实标题>" --authors "First Last;First Last" \
   --year 2026 --venue "AAAI" --type conference \
   --notion "<Notion URL>" \
-  --tags p:protein-structure-prediction,m:molecular-dynamics,d:simulated
+  --tags d:simulated
 ```
 
 `--pdf` 传第 6.0 节生成的重命名副本（附件文件名即重命名名，脚本用 `basename` 取）；`--title` 仍是论文真实标题，作为 Zotero 的书目信息，区别于 Notion 的 `标题`（重命名名）——两者各司其职，不要混用。
 
 `--citekey` 省略时脚本优先保留既有键，仅新记录自动计算机器键；已有 Notion 记录时应传其采用的键以核对一致性。
 
-- `--type` 与笔记里的 `类型` 一致，脚本据此选 Zotero 的 itemType（conference → `conferencePaper`，journal/review → `journalArticle`，other → `document`）。
+- `--type` 是 **Zotero 条目类型**，与笔记第 3 行的 `类型`（骨架：`algorithm` / `science` / `review` / `other`）是两件事：`conference` → `conferencePaper`，`journal`／`review` → `journalArticle`，`other` → `document`。发在会议上的算法论文传 `conference`，发在期刊的算法论文传 `journal`——骨架看这篇怎么立论，条目类型看它发在哪。
 - `--venue` 只放刊名／会议名，不带年份，与 Notion 的 `发表` 字段同值。
 - 本地身份解析与服务端查重都拒绝多命中；优先用 DOI 等强标识核对。唯一匹配才更新，保留未提供的元数据和手写标签。
 - PDF 作为 `imported_file` 子条目上传。上传成功后才回填 `md5`／`mtime`；如果中途失败，脚本会删掉留下的空附件再重试，不会积累一堆无文件的条目。
@@ -172,8 +169,8 @@ python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
 
 三件事，缺一不可：
 
-1. `Extra` 加一行 `Notion: <页面 URL>`。已有则替换那一行，不要留成两行。
-2. 三族标签写进 Zotero 条目，加前缀：`p:` 问题域、`m:` 方法族、`d:` 数据类型。前缀取自 `config.local.json` → `zotero_tag_prefix`。Zotero 标签是扁平的，前缀是唯一能留住维度的办法。
+1. `Extra` 加一行 `Notion: <页面 URL>`（飞书后端则为 `Feishu: <页面 URL>`）。已有则替换那一行，不要留成两行。
+2. 数据类型写进 Zotero 条目，加前缀：`d:` 数据类型。前缀取自 `config.local.json` → `zotero_tag_prefix`。Zotero 标签是扁平的，前缀是唯一能留住维度的办法。领域那类归口不在这里写——用户在云端表里手填。
 3. 笔记里写了与另一篇的关系，就去那一篇补一条反向关系。单向关系半年后等于没有。
 
 用 `scripts/zotero_write.py` 做前两步：
@@ -181,13 +178,14 @@ python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
 ```bash
 python scripts/zotero_write.py --citekey <citekey> --show
 python scripts/zotero_write.py --citekey <citekey> \
-  --tags p:protein-design,m:diffusion,d:PDB \
+  --tags d:PDB \
   --extra https://www.notion.so/<page>
 ```
 
 要点：
 
-- 它先读条目再合并，不整块覆盖。带 `p:` / `m:` / `d:` 前缀的标签算 skill 自己的，会被替换；你自己加的其他标签原样保留。
+- 它先读条目再合并，不整块覆盖。带 `d:` 前缀的标签算 skill 自己的，会被替换；你自己加的其他标签原样保留。
+- 条目解析顺序：本地快照 → API 按**精确标题**搜（先试 `## 定位素材` 里 `原文：` 的论文真名，再试笔记标题）→ API 按 citekey 搜。标题优先是因为 Zotero 的 `q=` 不索引 `Extra`，按 citekey 搜不到只写在 `Citation Key` 里的条目。
 - 需要 `zotero.user_id` 与 `zotero.api_key`（或用环境变量 `ZOTERO_USER_ID` / `ZOTERO_API_KEY`）。key 在 https://www.zotero.org/settings/keys 建，勾 library access + write access，要写子笔记再加 notes access。
 - `--dry-run` 只打印改动。写失败会打印 HTTP 状态与响应体。
 
@@ -197,7 +195,9 @@ python scripts/zotero_write.py --citekey <citekey> \
 
 ---
 
-### 6.3 Notion 图像与完成状态
+### 6.3 图像与完成状态
+
+后端二选一。**飞书后端**：裁图同样用 `fig_upload.py crop` 产出 manifest，但上传与插入由 `scripts/publish.py` 一次做完（不需要 MCP，也不需要 `tag` 一步），走法与回读标准见 `reference-feishu.md`。**Notion 后端**：下面三步是硬依赖。
 
 正文仍由 Notion MCP 写入。首次发布前必须先按 `reference-notion.md` 完成 MCP 安装、schema 与读写探针；只读成功不够。随后检查当前工具的图片上传或嵌入能力：本地文件路径不能当远端图片地址，`zotero://` 指针也不能代替图片。
 
@@ -224,9 +224,9 @@ python scripts/zotero_write.py --citekey <citekey> \
 
    反例："9个token mixer×8个数据集受控对比"（只说了做了什么）。正例："P3 受控对比：参数规模相同只换token mixer，静态图像Conv最优、神经形态linear attention最优、MQAR检索只有2D矩阵记忆能做——SparseLA在中等记忆任务上效率/性能平衡最好"。
 5. 最后回读同一页面一次，核对 citekey、正文和全部图片块；工具不支持上传或上传失败时，任务状态保持「发布受阻（未完成）」，不宣称完成。不要为绕过上传而公开私人 PDF 或图片。
-4. 记录 Notion page ID 后再回写 Zotero。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
+6. 记录 page ID（飞书是 doc_id）后再回写 Zotero：`Extra` 写 `Notion: <url>` 或 `Feishu: <url>`，与发布后端一致。回写失败只重试未完成步骤；远端结果不确定时先读回状态，避免重复创建页面或附件。
 
-`run_state.py` 是本地执行记录，不会代替 MCP 上传，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应、分段耗时与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。Notion 成功后的本地稿只作可删除的工作缓存，成品仍以 Notion 为准。
+`run_state.py` 是本地执行记录，不会代替 MCP 上传或 `publish.py` 的回读，也不会自行证明远端成功。按 `reference-engineering.md` 保存实际工具响应、分段耗时与回读结果；源 PDF 或笔记变化后，重新检查受影响步骤。发布成功后本地稿只作可删除的工作缓存，成品以云端为准。
 
 ---
 

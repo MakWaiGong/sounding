@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,18 +29,69 @@ import config  # noqa: E402
 import paper_identity as identity  # noqa: E402
 
 
-def item_key_from_citekey(citekey, cfg):
-    """Resolve an existing key or DOI using the shared read-only snapshot."""
+def item_key_from_citekey(citekey, cfg, title=None, alt_titles=()):
+    """Resolve an existing item: local snapshot, then the Web API.
+
+    The local Zotero database can lag behind the server (an item created on
+    another machine is absent until Zotero syncs), and an item created
+    elsewhere may carry no citation key yet. So: local snapshot → exact-title
+    search for each candidate title → search by citation key.
+
+    Title search comes first because Zotero's ``q=`` does not index ``Extra``,
+    so ``q=<citekey>`` returns nothing for an item whose key lives there.
+    ``alt_titles`` carries the paper's real title when the note title is a
+    Chinese short name.
+    """
     db = config.zotero_db(cfg)
-    if not db or not os.path.exists(db):
-        return None, "no zotero.db_path configured"
-    try:
-        item = identity.lookup_local(db, citekey)
-    except identity.IdentityError as e:
-        return None, str(e)
-    if not item:
+    if db and os.path.exists(db):
+        try:
+            item = identity.lookup_local(db, citekey)
+        except identity.IdentityError as e:
+            return None, str(e)
+        if item:
+            return item["item_key"], None
+    for candidate in [t for t in (*alt_titles, title) if t]:
+        key, _ = _api_item_key_from_title(candidate, cfg)
+        if key:
+            return key, None
+    return _api_item_key_from_citekey(citekey, cfg)
+
+
+def _api_item_key_from_citekey(citekey, cfg):
+    base, user_id, api_key = config.zotero_api(cfg)
+    if not (base and user_id and api_key):
         return None, f"citekey {citekey!r} not found in the local library"
-    return item["item_key"], None
+    url = (f"{base}/users/{user_id}/items/top"
+           f"?q={urllib.parse.quote(citekey)}&qmode=everything&limit=25")
+    status, _, body = request("GET", url, api_key)
+    if status != 200 or not isinstance(body, list):
+        return None, f"citekey {citekey!r} not found locally or via API (HTTP {status})"
+    for item in body:
+        data = item.get("data") or {}
+        extra = (data.get("extra") or "").lower()
+        if (data.get("citationKey") == citekey
+                or f"citation key: {citekey}" in extra
+                or f"citekey: {citekey}" in extra):
+            return item.get("key") or data.get("key"), None
+    return None, f"citekey {citekey!r} not found locally or via API"
+
+
+def _api_item_key_from_title(title, cfg):
+    """Exact-title fallback for items that carry no citation key yet."""
+    base, user_id, api_key = config.zotero_api(cfg)
+    if not (base and user_id and api_key):
+        return None, "no zotero credentials"
+    url = (f"{base}/users/{user_id}/items/top"
+           f"?q={urllib.parse.quote(title)}&qmode=titleCreatorYear&limit=10")
+    status, _, body = request("GET", url, api_key)
+    if status != 200 or not isinstance(body, list):
+        return None, f"title search failed (HTTP {status})"
+    want = " ".join(title.split()).casefold()
+    for item in body:
+        data = item.get("data") or {}
+        if " ".join((data.get("title") or "").split()).casefold() == want:
+            return item.get("key") or data.get("key"), None
+    return None, f"title {title!r} not found via API"
 
 
 def request(method, url, api_key, body=None, headers=None):

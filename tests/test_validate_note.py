@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -10,10 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import validate_note
 
 
-def note_text(paper_type="conference", digest_count=10):
+def note_text(paper_type="algorithm", digest_count=10):
     headings = {
-        "conference": ["1 科学故事：具体问题", "2 灵感", "3 具体算法", "4 基线对比"],
-        "journal": ["1 痛点", "2 空白与核心新发现", "3 论证链"],
+        "algorithm": ["1 科学故事：具体问题", "2 灵感", "3 具体算法", "4 基线对比"],
+        "science": ["1 痛点", "2 空白与核心新发现", "3 论证链"],
+        "review": ["1 它想改什么惯例", "2 覆盖面与边界", "3 评价方法本身", "4 我能拿它做什么"],
         "other": ["1 它想改什么惯例", "2 覆盖面与边界", "3 评价方法本身", "4 我能拿它做什么"],
     }
     text = f"标题：测试论文\n发表：Example (2026)\n类型：{paper_type}\ncitekey：paper-key\n\n"
@@ -42,7 +43,7 @@ class ValidateNoteTests(unittest.TestCase):
         return validate_note.validate_note(self.path, **kwargs)
 
     def test_all_templates_and_hash(self):
-        for kind in ("conference", "journal", "other"):
+        for kind in ("algorithm", "science", "review", "other"):
             with self.subTest(kind=kind):
                 report = self.validate(note_text(kind), source_manifest=self.manifest)
                 self.assertTrue(report["valid"], report["errors"])

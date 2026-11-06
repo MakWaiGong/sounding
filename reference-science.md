@@ -1,6 +1,6 @@
-# Journal template — three parts
+﻿# Science template — three parts
 
-Used when Figure 1 is a workflow or mechanism schematic, or when the paper carries both a model and wet-lab validation. Journal papers are written in lab-chronological order, so the evidence must be reordered around the claim. That reordering is the whole job.
+Used when Figure 1 is a workflow or mechanism schematic, or when the paper carries both a model and wet-lab validation. Science papers are written in lab-chronological order, so the evidence must be reordered around the claim. That reordering is the whole job.
 
 ---
 

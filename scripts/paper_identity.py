@@ -114,13 +114,15 @@ def merge_tags(existing, wanted, prefixes):
     return result
 
 
-def merge_extra(existing, *, citekey=None, notion=None):
+def merge_extra(existing, *, citekey=None, notion=None, feishu=None):
     """Only replace explicitly supplied managed lines. Preserve all other text."""
     updates = {}
     if citekey is not None:
         updates["citation key"] = ("Citation Key", citekey)
     if notion is not None:
         updates["notion"] = ("Notion", notion)
+    if feishu is not None:
+        updates["feishu"] = ("Feishu", feishu)
     lines = [line for line in (existing or "").splitlines()
              if line.partition(":")[0].strip().lower() not in updates]
     lines.extend(f"{name}: {value}" for name, value in updates.values())

@@ -16,13 +16,11 @@ from pathlib import Path
 
 import config
 
-REQUIRED = ["title", "venue", "year", "type", "citekey",
-            "problem", "method", "data", "verdict"]
+REQUIRED = ["title", "venue", "year", "type", "citekey", "data", "verdict"]
 OPTIONAL = ["topic", "domain", "wave", "group"]
 FIELD_TYPES = {
     "title": "title", "venue": "rich_text", "year": "number", "type": "select",
-    "citekey": "rich_text", "problem": "multi_select",
-    "method": "multi_select", "data": "multi_select", "verdict": "select",
+    "citekey": "rich_text", "data": "multi_select", "verdict": "select",
     "topic": "relation", "domain": "relation", "wave": "relation", "group": "relation",
     "confidence": "select", "role": "select", "generation": "relation",
     "generation_name": "rich_text", "opened": "rich_text", "borrowed_from": "relation",
@@ -69,11 +67,9 @@ def validate(cfg, schema=None):
     if not isinstance(prefixes, dict):
         problems.append("zotero_tag_prefix must be an object")
     else:
-        values = [prefixes.get(k) for k in ("problem", "method", "data")]
-        if any(not isinstance(v, str) or not v for v in values):
-            problems.append("all three Zotero tag prefixes must be nonempty strings")
-        elif len(set(values)) != 3 or any(a.startswith(b) for a in values for b in values if a != b):
-            problems.append("Zotero tag prefixes must be distinct and not overlap")
+        value = prefixes.get("data")
+        if not isinstance(value, str) or not value:
+            problems.append("the data Zotero tag prefix must be a nonempty string")
     if schema is None:
         return problems
     if not isinstance(schema, dict) or not isinstance(schema.get("properties"), dict):

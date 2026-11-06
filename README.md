@@ -20,7 +20,7 @@
 
 单篇读完先产出笔记与定位素材；一批回顾后再产出位置和方向判断：
 
-- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、三种骨架之一（按论文结构选：conference 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / journal 三段式 / other 通用式）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
+- **笔记** —— 含 10 行速览（几个月后只会重看这一段）、四种骨架之一（按论文结构选：algorithm 四段式（科学故事 / 灵感 / 具体算法 / 基线对比） / science 三段式 / review 与 other 通用式）、从原 PDF 裁下并逐块解释的图、符号表、每个损失项在防哪种失败、指标定义与互补盲区、湿实验六项（n、重复、检验、离散度、p、多重比较校正）、与已读的关系
 - **定位素材** —— 单篇只留可核对的能力变化、比较口径、课题组事实和前后作线索，状态为 `待回顾`；不自动判 wave
 - **位置** —— 回顾时由 agent 对齐多篇证据与候选划分，用户确认潮、世代、课题组、角色、开创性、证据强度与推翻条件后才回写
 - **判断** —— 这个方向缺什么，判据是什么，什么证据会推翻它
@@ -42,12 +42,14 @@
 | `scripts/paper_identity.py` | 共用身份解析、DOI 别名与只读 SQLite 一致性快照 |
 | `scripts/zotero_find.py` | 查作者／标题／年份／DOI／citekey，支持 JSON 一次返回元信息和附件 |
 | `scripts/zotero_add.py` | 建条目、上传 PDF、并入 `sounding` 集合，写 `Citation Key` 与 `Notion` 到 Extra |
-| `scripts/zotero_write.py` | 回写三族标签与 Notion 链接，合并式，不动手写标签 |
+| `scripts/zotero_write.py` | 回写数据类型标签与 Notion 链接，合并式，不动手写标签 |
 | `scripts/pdf_prepare.py` | 按 PDF 指纹缓存逐页原文、图注候选和坐标，支持检索 |
 | `scripts/fig.py` | 扫图注、裁图、渲染页面，支持 JSON 清单批量裁图 |
 | `scripts/validate_note.py` | 检查笔记结构、图片路径与来源定位；不代替语义核对 |
 | `scripts/run_state.py` | 记录实际完成步骤和待办，识别源文件/笔记变化 |
 | `scripts/notion_workspace.py` | 缓存工作区级 MCP 读写探针，避免逐篇重复验收 |
+| `scripts/feishu_setup.py` | 首次配置飞书：建 base、文件夹、五张表与字段，跑读写探针 |
+| `scripts/publish.py` | 把一篇笔记发布到飞书：云文档 + `Papers` 行，回读验收并回写 Zotero |
 
 ## 安装
 
@@ -133,7 +135,7 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `notion.papers_data_source_id` | 同库的 data source，`collection://…` |
 | `notion.properties` | 概念名 → 你库里的真实字段名 |
 | `notion.option_values` | select 字段的合法值 |
-| `zotero_tag_prefix` | 三族标签在 Zotero 侧的前缀 |
+| `zotero_tag_prefix` | 数据类型标签在 Zotero 侧的前缀 |
 
 环境变量可覆盖文件：`ZOTERO_DB`、`ZOTERO_DATA_DIR`、`NOTION_PAPERS_DB`、`NOTION_PAPERS_DS`。本地配置按嵌套字段覆盖默认值，未填写的默认项保留；显式空值仍保留为空。
 
@@ -146,19 +148,16 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `title` | title | 论文标题 |
 | `venue` | text | 刊名或会议名，不带年份 |
 | `year` | number | |
-| `type` | select | `conference` / `journal` / `review` / `other` |
+| `type` | select | `algorithm` / `science` / `review` / `other` |
 | `citekey` | text | 稳定操作键：优先由规范化 DOI 派生的 `sha1` 前 10 位；原始 DOI 只作身份与查询别名 |
-| `problem` | multi-select | 问题域 |
-| `method` | multi-select | 方法族 |
 | `data` | multi-select | 数据类型 |
-| `verdict` | select | `值得跟进` / `存档` / `仅作背景` |
+| `doi` | text | `10.xxxx/xxxx`，从笔记 `定位素材` 的 `原文：` 行取，缺了不报错 |
 | `topic` / `domain` / `wave` / `group` | relation | 选填；`wave` 与地图层的 `group` 只在用户确认回顾结论后连接 |
-| `confidence` | select | `猜测` / `有据` / `复核`，用户确认定位后填写 |
 | `role` | select | `创世` / `追随` / `旁支` / `方法件` / `未定`，用户确认定位后填写 |
 | `generation` / `generation_name` / `opened` | relation / text / text | 世代与「从 X 变成 Y」，用户确认定位后填写 |
 | `borrowed_from` / `followers` | relation | 借自谁、谁在跟，用户确认定位后填写 |
 
-三族标签是三个独立的多选字段，因为 Notion 多选不支持嵌套。Zotero 侧标签是扁平的，靠 `p:` / `m:` / `d:` 前缀保留维度。
+数据类型是一个多选字段。领域不是标签：它是用户在云端表里手填的链接列，skill 不写不查。Zotero 侧标签是扁平的，靠 `d:` 前缀保留维度。
 
 任何映射字段在库里不存在，skill 停下报告，不丢值。
 
@@ -184,19 +183,42 @@ Notion 是主库，Zotero 只存 PDF 与书目信息。被本 skill 读过的条
 
 本地稿可以用于故障恢复，但此时任务必须标为「发布受阻（未完成）」。页面写入后要按同一 page ID 回读正文、属性和图片引用，成功后再把 Notion URL 回写 Zotero。
 
+## 飞书（可选第二发布面）
+
+飞书是 Notion 之外的另一个发布出口：一篇笔记 = 多维表格 `论文 Papers` 里一行 + 一篇云文档正文。它不走 Notion MCP，markdown 由脚本自己转成飞书 block，所以发布必须走 `scripts/publish.py`，不能由 agent 手搓 API。完整流程、库结构、已知坑与延迟基线见 [reference-feishu.md](reference-feishu.md)。
+
+**每个用户自己建应用**——跨租户不可行，不能复用别人的凭证：飞书自建应用的 `tenant_access_token` 只在应用所属租户内有效，交出 `app_secret` 等于交出整个租户的云文档写权限，且云文档 owner 是应用、换应用就断链。所以第一次用要花约 5 分钟：
+
+1. 到 https://open.feishu.cn 建一个自建应用（名字随意，如 `sounding`），复制「凭证与基础信息」里的 App ID / App Secret。
+2. 开 4 个权限 scope：`drive:drive`、`docx:document`、`bitable:app`、`wiki:wiki`。
+3. **创建版本并发布**——飞书里不发布版本，scope 不生效，调接口会报权限错。
+4. 把 App ID / App Secret 填进 `config.local.json` 的 `feishu` 段（`app_id` / `app_secret`）。
+5. 跑 `python scripts/feishu_setup.py --apply` 建 base「sounding 论文库」、文件夹、五张表与字段，再 `--probe --apply` 做一次读写探针。
+
+发布命令：
+
+```bash
+python scripts/publish.py notes/<citekey>.md \
+  --data PDB,scRNA-seq \
+  --zotero
+```
+
+后端在配置阶段二选一：`feishu` 段填了应用凭证就走飞书，`notion` 段填了库 id 就走 Notion，同一篇笔记只发一处。不接飞书就把 `feishu` 段留空即可。
+
 ## 文件
 
 ```
 SKILL.md                 流程与规则
-reference-conference.md  四段式模板，逐节验收
-reference-journal.md     三段式模板，逐节验收
+reference-algorithm.md  四段式模板，逐节验收
+reference-science.md     三段式模板，逐节验收
 reference-other.md       综述 / benchmark / 数据集 / 立场论文的骨架
 reference-evidence.md    所有类型的共用规则：符号、损失、指标、湿实验统计
 reference-metrics.md     标准指标与统计术语表
-reference-tags.md        三族受控词表
+reference-tags.md        数据类型受控词表
 reference-library.md     字段映射、幂等、回写
 reference-engineering.md 缓存、批量裁图、机械校验、运行记录的命令约定
 reference-notion.md      Notion MCP 安装、读写探针、发布完成与阻塞标准
+reference-feishu.md      飞书后端：库初始化、字段表、已知坑与延迟基线
 reference-wave.md        批量观潮：定位素材、候选划分、人工决策与回写
 reference-topic.md       课题页模板
 config.example.json      出厂默认
@@ -212,6 +234,11 @@ scripts/paper_identity.py 共用身份查询与只读快照
 scripts/validate_note.py  机械验收
 scripts/run_state.py      运行进度与失效检查
 scripts/notion_workspace.py 工作区级 Notion 探针缓存
+scripts/feishu_api.py     飞书开放接口封装（token、文档、表格、上传）
+scripts/feishu_doc.py     markdown → 飞书 block 渲染器（图内联、速览 callout、标题着色）
+scripts/feishu_schema.py  飞书表字段与枚举
+scripts/feishu_setup.py   建飞书 base/文件夹/表/字段 + 读写探针
+scripts/publish.py        发布一篇笔记到飞书（幂等、回读、回写 Zotero）
 schemas/run.schema.json   运行状态格式
 tests/                   离线行为测试
 pyproject.toml           Python 版本与依赖
@@ -233,7 +260,7 @@ python scripts/zotero_find.py --tags
 python scripts/zotero_find.py --citekey yangArbovirusSuppressionLectin2025 --json
 
 python scripts/zotero_write.py --citekey key --show
-python scripts/zotero_write.py --citekey key --tags p:x,m:y,d:z --extra https://www.notion.so/…
+python scripts/zotero_write.py --citekey key --tags d:z --extra https://www.notion.so/…
 
 python scripts/fig.py scan paper.pdf --page 3
 python scripts/fig.py crop paper.pdf --page 3 --bbox 197,72,415,394 --out fig1.png --dpi 220
@@ -254,9 +281,9 @@ python scripts/check_config.py --schema-json notes/schema.json
 
 | 信号 | 类型 |
 | --- | --- |
-| Figure 1 是模块图，章节是 Method/Experiments | `conference` |
-| Figure 1 是流程或机制图，章节是 Results/Discussion | `journal` |
-| 机制示意图与独立方法模块并存（干湿结合） | `journal` |
+| Figure 1 是模块图，章节是 Method/Experiments | `algorithm` |
+| Figure 1 是流程或机制图，章节是 Results/Discussion | `science` |
+| 机制示意图与独立方法模块并存（干湿结合） | `science` |
 | 都不是——综述、benchmark、数据集、立场论文 | `other` |
 
 ## 观潮

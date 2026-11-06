@@ -25,8 +25,6 @@
       "year": "",
       "type": "",
       "citekey": "",
-      "problem": "",
-      "method": "",
       "data": "",
       "verdict": "",
       "topic": "",
@@ -44,15 +42,28 @@
 
     "_option_values_comment": "The legal values of the select fields. Type and verdict are set by the skill.",
     "option_values": {
-      "type": ["conference", "journal", "review", "other"],
+      "type": ["algorithm", "science", "review", "other"],
       "verdict": ["值得跟进", "存档", "仅作背景"]
     }
   },
 
-  "_tag_prefix_comment": "Zotero tags are flat, so each tag family is carried by a prefix. Notion uses three separate multi-select fields and needs no prefix.",
+  "feishu": {
+    "_app_comment": "Optional second publish target. Create a self-built app at https://open.feishu.cn (name it after the skill), then copy App ID / App Secret from 凭证与基础信息. Add scopes drive:drive, docx:document, bitable:app, wiki:wiki, then 创建版本并发布 (create a version and release it) -- scopes take no effect until a version is published. Keep app_secret in config.local.json or FEISHU_APP_SECRET -- never here.",
+    "app_id": "",
+    "app_secret": "",
+    "api_base": "https://open.feishu.cn",
+
+    "_domain_comment": "Your tenant host, e.g. acme.feishu.cn. Only used to build human-clickable links; run scripts/feishu_setup.py to fill it in.",
+    "domain": "",
+
+    "_workspace_comment": "Filled in by scripts/feishu_setup.py. The base holds the 论文 Papers table; the docx bodies live under folder_token. Leave empty and setup creates them.",
+    "base_app_token": "",
+    "papers_table_id": "",
+    "folder_token": ""
+  },
+
+  "_tag_prefix_comment": "Zotero tags are flat, so the data family is carried by a prefix. Notion uses one multi-select field and needs no prefix.",
   "zotero_tag_prefix": {
-    "problem": "p:",
-    "method": "m:",
     "data": "d:"
   }
 }

@@ -1,4 +1,4 @@
-import contextlib
+﻿import contextlib
 import io
 import json
 import os
@@ -18,9 +18,9 @@ def fixture_config():
     return {
         "notion": {
             "properties": {key: key for key in check_config.REQUIRED},
-            "option_values": {"type": ["conference", "journal", "review", "other"]},
+            "option_values": {"type": ["algorithm", "science", "review", "other"]},
         },
-        "zotero_tag_prefix": {"problem": "p:", "method": "m:", "data": "d:"},
+        "zotero_tag_prefix": {"data": "d:"},
     }
 
 
@@ -77,7 +77,7 @@ class ConfigTests(unittest.TestCase):
         del schema["properties"]["venue"]
         issues = " ".join(check_config.validate(cfg, schema))
         self.assertIn("expected number", issues)
-        self.assertIn("conference", issues)
+        self.assertIn("algorithm", issues)
         self.assertIn("missing field 'venue'", issues)
 
     def test_empty_schema_and_duplicate_mappings_fail(self):

@@ -1,4 +1,4 @@
-"""Check Sounding note structure and local references, not scientific correctness.
+﻿"""Check Sounding note structure and local references, not scientific correctness.
 
 Reads Markdown and an optional pdf_prepare.py source manifest. It never contacts
 Notion, Zotero or image URLs. Exit 1 means structural errors; warnings require
@@ -15,8 +15,8 @@ from run_state import atomic_json
 
 
 PARTS = {
-    "conference": (("科学故事", "痛点"), ("灵感",), ("具体算法",), ("基线对比", "极限对比")),
-    "journal": (("痛点",), ("空白", "核心新发现"), ("论证链",)),
+    "algorithm": (("科学故事", "痛点"), ("灵感",), ("具体算法",), ("基线对比", "极限对比")),
+    "science": (("痛点",), ("空白", "核心新发现"), ("论证链",)),
     "other": (("惯例",), ("覆盖面",), ("评价方法",), ("拿它做什么",)),
 }
 HEAD = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -125,7 +125,7 @@ def validate_note(path, source_manifest=None, expected_citekey=None):
     if paper_type == "review":
         paper_type = "other"
     if paper_type not in PARTS:
-        error("paper_type", "类型应为 conference、journal、other 或 review")
+        error("paper_type", "类型应为 algorithm、science、other 或 review")
     headers = [(i, len(m.group(1)), m.group(2).replace("**", ""))
                for i, line in enumerate(lines) if (m := HEAD.match(line))]
     meta_end = nonempty[3][0] + 1 if len(nonempty) >= 4 else len(lines)

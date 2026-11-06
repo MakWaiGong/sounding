@@ -1,4 +1,4 @@
-import json
+﻿import json
 from pathlib import Path
 import sys
 import tempfile
@@ -18,7 +18,7 @@ class NotionWorkspaceTests(unittest.TestCase):
             "papers_database_id": "db-a",
             "papers_data_source_id": "collection://ds-a",
             "properties": {"title": "标题", "citekey": "citekey"},
-            "option_values": {"type": ["journal", "other"]},
+            "option_values": {"type": ["science", "other"]},
         }}
         self.receipt = {
             "database_id": "db-a", "data_source_id": "collection://ds-a",
