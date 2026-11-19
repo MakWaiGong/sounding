@@ -17,6 +17,8 @@ from run_state import atomic_json
 PARTS = {
     "algorithm": (("科学故事", "痛点"), ("灵感",), ("具体算法",), ("基线对比", "极限对比")),
     "science": (("痛点",), ("空白", "核心新发现"), ("论证链",)),
+    "review": (("研究问题与范围",), ("概念界定与文献组织",), ("综合判断与依据",),
+               ("评价规约与研究议程",), ("覆盖边界与使用",)),
     "other": (("惯例",), ("覆盖面",), ("评价方法",), ("拿它做什么",)),
 }
 HEAD = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
@@ -122,8 +124,6 @@ def validate_note(path, source_manifest=None, expected_citekey=None):
     if metadata.get("发表") and not re.search(r"\b(?:19|20)\d{2}\b", metadata["发表"]):
         error("venue_year", "正文发表信息需要带年份")
     paper_type = metadata.get("类型", "")
-    if paper_type == "review":
-        paper_type = "other"
     if paper_type not in PARTS:
         error("paper_type", "类型应为 algorithm、science、other 或 review")
     headers = [(i, len(m.group(1)), m.group(2).replace("**", ""))
@@ -141,14 +141,22 @@ def validate_note(path, source_manifest=None, expected_citekey=None):
     if any(numbered) and (not all(numbered) or
                           [int(m.group(1)) for m in numbered if m] != list(range(1, 11))):
         error("digest_numbering", "编号速览应连续使用 1 至 10")
-    position = -1
-    for choices in PARTS.get(paper_type, ()):
-        candidate = next((h for h in headers if h[0] > position and h[0] >= end
-                          and h[1] <= 2 and any(x in h[2] for x in choices)), None)
-        if candidate is None:
-            error("template_section", "缺少或顺序不符的主要章节：" + " / ".join(choices))
-        else:
-            position = candidate[0]
+    def missing_sections(parts):
+        position, missing = -1, []
+        for choices in parts:
+            candidate = next((h for h in headers if h[0] > position and h[0] >= end
+                              and h[1] <= 2 and any(x in h[2] for x in choices)), None)
+            if candidate is None:
+                missing.append(choices)
+            else:
+                position = candidate[0]
+        return missing
+
+    missing = missing_sections(PARTS.get(paper_type, ()))
+    if paper_type == "review" and missing and not missing_sections(PARTS["other"]):
+        missing = []  # Existing review notes used the complete other skeleton.
+    for choices in missing:
+        error("template_section", "缺少或顺序不符的主要章节：" + " / ".join(choices))
     for title in ("与已读的关系", "待查"):
         heading = next((h for h in headers if title in h[2]), None)
         if not heading:

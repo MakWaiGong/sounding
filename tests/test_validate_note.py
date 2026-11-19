@@ -14,7 +14,8 @@ def note_text(paper_type="algorithm", digest_count=10):
     headings = {
         "algorithm": ["1 科学故事：具体问题", "2 灵感", "3 具体算法", "4 基线对比"],
         "science": ["1 痛点", "2 空白与核心新发现", "3 论证链"],
-        "review": ["1 它想改什么惯例", "2 覆盖面与边界", "3 评价方法本身", "4 我能拿它做什么"],
+        "review": ["1 研究问题与范围", "2 概念界定与文献组织", "3 综合判断与依据",
+                   "4 评价规约与研究议程", "5 覆盖边界与使用"],
         "other": ["1 它想改什么惯例", "2 覆盖面与边界", "3 评价方法本身", "4 我能拿它做什么"],
     }
     text = f"标题：测试论文\n发表：Example (2026)\n类型：{paper_type}\ncitekey：paper-key\n\n"
@@ -50,6 +51,34 @@ class ValidateNoteTests(unittest.TestCase):
                 self.assertEqual(report["schema_version"], 2)
                 self.assertEqual(report["source_sha256"], "a" * 64)
                 self.assertEqual(report["note_sha256"], hashlib.sha256(self.path.read_bytes()).hexdigest())
+
+    def test_legacy_review_skeleton_remains_valid(self):
+        legacy = note_text("other").replace("类型：other", "类型：review")
+        report = self.validate(legacy)
+        self.assertTrue(report["valid"], report["errors"])
+
+    def test_review_rejects_missing_out_of_order_and_mixed_skeletons(self):
+        review = note_text("review")
+        second = "## 2 概念界定与文献组织\n具体内容。"
+        third = "## 3 综合判断与依据\n具体内容。"
+        cases = [
+            review.replace("## 4 评价规约与研究议程", "## 4 其他"),
+            review.replace(second + "\n\n" + third, third + "\n\n" + second),
+            review.replace("## 4 评价规约与研究议程", "## 4 评价方法本身"),
+        ]
+        for text in cases:
+            with self.subTest(text=text):
+                report = self.validate(text)
+                self.assertIn("template_section", [e["code"] for e in report["errors"]])
+
+    def test_review_reference_names_match_validator(self):
+        reference = (Path(__file__).resolve().parents[1] / "reference-other.md").read_text(encoding="utf-8-sig")
+        for index, choices in enumerate(validate_note.PARTS["review"], 1):
+            self.assertIn(f"### 第 {index} 段 {choices[0]}", reference)
+
+    def test_other_does_not_accept_review_skeleton(self):
+        report = self.validate(note_text("review").replace("类型：review", "类型：other"))
+        self.assertIn("template_section", [e["code"] for e in report["errors"]])
 
     def test_wrong_digest_and_citekey(self):
         report = self.validate(note_text(digest_count=9), expected_citekey="other")

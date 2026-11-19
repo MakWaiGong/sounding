@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1536" height="658" viewBox="0 0 1536 658" role="img" aria-labelledby="cover-title cover-desc">
+  <title id="cover-title">观潮 / Sounding</title>
+  <desc id="cover-desc">多次测深勾勒学术海床；多个独立测点与不确定的海底轮廓。</desc>
+  <image href="sounding-cover-background.png" xlink:href="sounding-cover-background.png" x="0" y="-183" width="1536" height="1024"/>
+  <text x="96" y="178" fill="#f5e8d1" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="120" font-weight="700">观潮</text>
+  <path d="M 352 105 L 352 180" fill="none" stroke="#8ba6a5" stroke-width="1.5"/>
+  <text x="376" y="166" fill="#f5e8d1" font-family="Arial, sans-serif" font-size="46" font-weight="700" letter-spacing="3">SOUNDING</text>
+  <text x="96" y="292" fill="#f5e8d1" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="60" font-weight="600">读懂一篇，看清一片</text>
+  <text x="96" y="368" fill="#c2d4ce" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="52">多次测深，勾勒学术海床</text>
+  <path d="M 96 410 H 168" fill="none" stroke="#7ca8a7" stroke-width="2"/>
+</svg>
