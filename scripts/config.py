@@ -166,3 +166,42 @@ def zotero_api(cfg=None):
         if val:
             z[field] = val
     return z.get("api_base") or "https://api.zotero.org", z.get("user_id"), z.get("api_key")
+
+
+def publishing_backend(cfg=None):
+    """Feishu is the default; legacy Notion must be selected explicitly."""
+    cfg = load() if cfg is None else cfg
+    section = cfg.get("publishing", {})
+    if not isinstance(section, dict):
+        raise ValueError("publishing must be an object")
+    backend = section.get("backend", "feishu")
+    if backend not in ("feishu", "notion"):
+        raise ValueError("publishing.backend must be feishu or notion; no automatic fallback")
+    return backend
+
+
+def feishu_destination(cfg=None):
+    """Parse the configured Bitable target offline, without fetching private data."""
+    from urllib.parse import urlparse, parse_qs
+    cfg = load() if cfg is None else cfg
+    section = cfg.get("feishu", {})
+    if not isinstance(section, dict):
+        raise ValueError("feishu must be an object")
+    url = section.get("destination_url")
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("feishu.destination_url is unset; publication BLOCKED (not complete)")
+    parsed = urlparse(url)
+    parts = parsed.path.strip("/").split("/")
+    if (parsed.scheme != "https" or not parsed.hostname
+            or not parsed.hostname.endswith(".feishu.cn") or parsed.username or parsed.password
+            or len(parts) != 2 or parts[0] != "base" or not parts[1]):
+        raise ValueError("feishu.destination_url must be a Feishu Bitable /base/ URL, not a docx URL")
+    query = parse_qs(parsed.query)
+    if any(len(query.get(key, [])) != 1 or not query[key][0] for key in ("table", "view")):
+        raise ValueError("Feishu Bitable destination requires table and view identifiers")
+    target = {"base_token": parts[1], "table_id": query["table"][0],
+              "view_id": query["view"][0]}
+    for key, value in target.items():
+        if section.get(key) != value:
+            raise ValueError(f"feishu.{key} must match destination_url")
+    return dict(target, destination_url=url)

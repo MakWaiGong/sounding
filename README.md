@@ -186,6 +186,10 @@ Notion 是主库，Zotero 只存 PDF 与书目信息。被本 skill 读过的条
 
 本地稿可以用于故障恢复，但此时任务必须标为「发布受阻（未完成）」。页面写入后要按同一 page ID 回读正文、属性和图片引用，成功后再把 Notion URL 回写 Zotero。
 
+## PDF 归档与笔记完成
+
+源 PDF 飞书归档为独立待办，不阻塞正文与图片回读。保留本地 PDF，直到同一记录返回真实 attachment/file token；不自动删除。Zotero 建条目、集合、PDF 上传和回链仅显式选择时执行，失败不撤销笔记完成。
+
 ## 飞书（可选第二发布面）
 
 飞书是 Notion 之外的另一个发布出口：一篇笔记 = 多维表格 `论文 Papers` 里一行 + 一篇云文档正文。它不走 Notion MCP，markdown 由脚本自己转成飞书 block，所以发布必须走 `scripts/publish.py`，不能由 agent 手搓 API。完整流程、库结构、已知坑与延迟基线见 [reference-feishu.md](reference-feishu.md)。

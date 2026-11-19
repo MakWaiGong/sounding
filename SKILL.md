@@ -1,6 +1,6 @@
 ---
 name: sounding
-description: 收到一篇研究论文后，直接按完整 sounding 流程拆成结构化笔记，并为用户主导的批量观潮回顾准备可核对的定位素材。按论文结构（不看发表处）在 algorithm、science、review、other 四种骨架里选一种；不做扫读、摘要式降级或“是否值得精读”的前置判断。单篇默认不由 agent 判定 wave；回顾时由 agent 对齐多篇证据，用户确认后再回写。笔记必须发布到云端（Notion 或飞书二选一，由配置决定），按稳定 citekey 幂等并回写 Zotero；发布后端未就绪时先完成配置与读写探针，不能以本地稿结束。Use when the user asks to read, deconstruct, annotate or summarize a paper (读这篇, 拆这篇, 精读, 文献笔记, 观潮, 测深, paper reading, sounding), or to add a paper to the reading library.
+description: 收到一篇研究论文后，直接按完整 sounding 流程拆成结构化笔记，并为用户主导的批量观潮回顾准备可核对的定位素材。按论文结构（不看发表处）在 algorithm、science、review、other 四种骨架里选一种；不做扫读、摘要式降级或“是否值得精读”的前置判断。单篇默认不由 agent 判定 wave；回顾时由 agent 对齐多篇证据，用户确认后再回写。笔记必须发布到云端（Notion 或飞书二选一，由配置决定），按稳定 citekey 幂等；Zotero 回链与 PDF 归档均为独立可选步骤；发布后端未就绪时先完成配置与读写探针，不能以本地稿结束。Use when the user asks to read, deconstruct, annotate or summarize a paper (读这篇, 拆这篇, 精读, 文献笔记, 观潮, 测深, paper reading, sounding), or to add a paper to the reading library.
 ---
 
 # 观潮 / Sounding
@@ -65,7 +65,7 @@ description: 收到一篇研究论文后，直接按完整 sounding 流程拆成
 
 先判断 Zotero 是否已配置（`config.local.json` → `zotero.data_dir` 存在且 `zotero.sqlite` 可读）：
 
-- **已配置 Zotero**：先查本地库，不要先问用户路径。
+- **已配置 Zotero（可选书目索引）**：可查本地库定位已有 PDF；查询不授权创建条目、添加集合或上传 PDF。
   ```bash
   python scripts/zotero_find.py "author 2025 keyword"
   python scripts/zotero_find.py --citekey <citekey> --pdf
@@ -82,11 +82,17 @@ description: 收到一篇研究论文后，直接按完整 sounding 流程拆成
 
 PDF 确定后先用 `python scripts/pdf_prepare.py "<PDF>"` 获取带页码的全文、图注候选和坐标缓存。重复查询与裁图复用同一 PDF 指纹的结果；缓存不代替完整阅读或看图。无文字层、部分页面无文字层、版本变化都保留在 manifest 中。命令和批量裁图见 `reference-engineering.md`。
 
+### PDF 默认存储与指针
+
+源 PDF 是分析必需输入。默认远端存储是飞书：笔记发布后，可由实际工具/浏览器在观察真实 schema 后，把源或重命名工作 PDF 上传到已配置多维表格的附件字段或该表既有文件机制；不得猜字段名、改远端 schema 或虚构上传 API。PDF 上传是独立、可延后的归档步骤，绝不阻塞笔记分析、正文写入、图片嵌入与回读。
+
+保留本地源 PDF 与重命名工作 PDF，直到飞书上传成功且从同一记录实际回读到 attachment/file token；pending 或失败时必须保留。验证后也只允许人工安全清理，本流程不自动删除 PDF。笔记内嵌图片仍属于笔记发布和回读，不等同于源 PDF 归档。
+
 ### PDF 指针怎么写
 
-笔记正文的**头部**写 PDF 指针，指向这份 skill 维护的那一份副本，不写散落在别处的临时路径。头部的 `本地 PDF：` 行只是元信息，**发布到云端时会被丢弃**；所以正文 `## PDF 与来源` 一节（第一个 `---` 之后）必须再写一行 `本地文件：` 指向同一个路径，保证云端笔记里能直接看到本地文件位置。
+笔记正文的**头部**写 PDF 指针，指向这份 skill 维护的那一份副本，不写散落在别处的临时路径。
 
-**已配置 Zotero**（指向 Zotero `sounding` 集合里的附件）：
+**显式选择旧版 Zotero PDF 归档**（可选兼容路径，指向 Zotero `sounding` 集合里的附件）：
 
 ```markdown
 本地 PDF：`<zotero.data_dir>\storage\<item key>\<filename>.pdf`（Zotero 集合 `<collection>` 内的附件）
@@ -96,7 +102,7 @@ Zotero：`zotero://select/library/items/<item key>`（粘进地址栏即跳到�
 - 路径来自 `zotero_find.py --citekey <citekey> --pdf`，是 Zotero 附件的真实存放位置。
 - 条目链接用 `zotero://select/library/items/<item key>`，item key 从 `zotero_find.py` 的输出取。
 - 集合名固定写 `sounding`（取自 `config.local.json` → `zotero.collection`）；条目不在这个集合里就先跑 `zotero_add.py` 并进去。
-- Notion 不接受 `file://` 协议，所以链接给 `zotero://`，不给本地路径做超链接；路径只作文字留证。
+- 本地路径只作文字留证，条目指针保留 `zotero://`；发布工具若不能保留该协议则用代码文字，不伪造可点击链接。
 - 入库之后再写指针：`zotero_add.py` 成功才算有 `zotero://` 那一条，指针与实际附件必须对得上。
 
 **未配置 Zotero**（指向用户指定的本地目录）：
@@ -107,12 +113,14 @@ Zotero：`zotero://select/library/items/<item key>`（粘进地址栏即跳到�
 
 没有 `zotero://` 那一行，也没有 Zotero 集合说明。
 
+正文 `## PDF 与来源`（第一个 `---` 之后）还须写一行 `本地文件：`，与头部工作 PDF 指针一致；云端正文不能依赖被剥离的头部元信息。
+
 ### PDF 重命名副本（文件名 = Notion 标题）
 
 分析始终用你丢进来的**原始 PDF**（`pdf_prepare.py`、判类型、裁图都基于它）；到第 8 步落库时，才按分析得出的类型与核心发现生成**重命名副本**。
 
-- **已配置 Zotero**：副本存进 `sounding` 集合目录（`config.local.json` → `zotero.data_dir` 下的 `zotero.collection` 目录，本机即 `<zotero.data_dir>\sounding`，不要写死绝对路径），之后的 `zotero_add.py --pdf` 传这个副本。
-- **未配置 Zotero**：副本存进用户在第 2 步指定的本地目录。
+- **默认飞书归档**：副本先存进用户指定的本地安全目录，上传并从同一记录回读到实际文件引用前保留。
+- **显式旧版 Zotero PDF 归档**：只有用户选择时才存进 `sounding` 集合并传给 `zotero_add.py --pdf`；不是默认路线。
 
 副本文件名就是这篇的**重命名名**。
 
@@ -258,7 +266,7 @@ citekey：zhangSpatialAtlas2024
 
 同一篇读两次，库里只能有一行。字段映射、缺字段处理、标签与回写见 `reference-library.md`。
 
-两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**写完回写 Zotero**（已配置 Zotero 时：`Extra` 写 `<后端名>: <url>`，即 `Notion: <url>` 或 `Feishu: <url>`，数据类型标签加 `d:` 前缀（领域由用户在云端表手填，脚本不写）；未配置 Zotero 时跳过此步，笔记里 PDF 指针指向用户指定目录）。
+两条硬要求：**映射字段在库里不存在就停下报错**，不静默丢弃；**正文与实际图片必须写后回读**。Zotero 仅在显式选择时回写后端 URL 与 `d:` 数据类型标签，不自动建条目、集合或上传 PDF；其失败不阻塞笔记完成。领域由用户手写，自动负载省略 domain。
 
 发布前运行 `scripts/validate_note.py` 做机械检查，再核对证据含义。主图用 `scripts/fig_upload.py crop` 裁完再上传：Notion 后端走 MCP 上传 + `fig_upload.py tag` 出标签（三步硬依赖，未上传则 tag 报错，见 `reference-library.md` §6.3）；飞书后端由 `scripts/publish.py` 直接按 `notes/figs/<citekey>/manifest.json` 上传，不需要 tag 一步。**没有 `manifest.json` 就没有图**：目录里已有裁图却没有 manifest 时，`publish.py` 会停下报错而不是发一篇无图笔记——补齐 manifest 再重发。长任务或失败重试用 `scripts/run_state.py` 记录实际完成步骤和 `timings_ms`。记录不代替外部工具的成功响应。
 
@@ -330,4 +338,4 @@ citekey：zhangSpatialAtlas2024
 - [ ] 发布后端探针有效（Notion：`notion_workspace.py` 缓存；飞书：`feishu_setup.py --probe` 通过）；写入后回读成功（Notion 按 page ID；飞书 `raw_content` + 图片块 + 表格数）
 - [ ] 笔记有 `定位素材`，默认状态为 `待回顾`，未自动填写地图字段
 - [ ] 做了观潮的，结论经过用户确认，并记录证据强度与推翻条件
-- [ ] 已配置 Zotero：`Extra` 与数据类型标签已回写；未配置：PDF 副本已存入用户指定目录
+- [ ] 正文、图片及同记录/同文档回读已完成；源 PDF 归档另记 `pdf_uploaded`，pending/失败不阻塞笔记完成；Zotero 回链/旧版 PDF 上传仅显式可选

@@ -2,6 +2,9 @@
 
 库是唯一的索引来源，笔记是正文。字段填不对，三个月后整库不可查。
 
+默认飞书发布使用应用 API 与 `scripts/publish.py`；领域（domain）内容及关系由用户本人手写，所有自动创建/更新负载均省略，保留已有值。源 PDF 飞书归档和 Zotero 回链均为独立可选步骤，不阻塞正文及图片回读完成。下方 Notion 专用 schema/命令仅适用于显式兼容路线，不得当作飞书 API。
+
+
 字段名一律来自真实 schema，不凭印象写。概念名 → 实际字段名的对应关系存在 `config.local.json` → `notion.properties`。
 
 ---
@@ -118,34 +121,27 @@ DOI 是论文身份的首选来源，但不原样写进 citekey。原始 DOI 含
 
 ---
 
-## 6 回写 Zotero
+## 6 可选 Zotero 回链与显式旧版 PDF 归档
 
-顺序是先条目后笔记：笔记要引用一个在库里真实存在的 citekey。库里没有条目，就先建，不要用一个临时串去写库。
+默认飞书流程可以查询已有 Zotero 书目并写可选回链，但不创建 Zotero 条目、不添加集合成员、不上传 PDF，也不要求 `sounding` 集合存在。缺少 Zotero 条目或任何 Zotero 写入失败都不影响笔记完成。
 
-### 6.0 集合：`sounding`
+### 6.0 显式旧版兼容集合：`sounding`（仅 opt-in）
 
-Notion 是主库，Zotero 只承担"存 PDF 与书目信息"的角色。所以库里有一个专用集合 `sounding`（名字取自 `config.local.json` → `zotero.collection`），凡是被本 skill 读过的论文都归档在这里。
+只有用户明确选择旧版 Zotero PDF 归档时，才启用本小节及 §6.1 的 `zotero_add.py --pdf` 流程，并把该路线处理的论文加入专用集合 `sounding`（名字取自 `config.local.json` → `zotero.collection`）。默认飞书流程不创建、不加入、不上传，也不重建这个集合。
 
-它回答的问题是：**这个 skill 维护的那批东西，边界在哪**。由此得到三个用法，也仅此三个：
+在这个 opt-in 路线内，集合有且仅有三个用途：
 
-- 导出它，就是一次完整备份（条目 + PDF）。
-- 打开它，就是"这些论文我按 sounding 读过"，不用在几百条里翻。
-- 它为空或丢了，重跑一次 `zotero_add.py` 就能重建。
+- 导出它，备份该旧版路线的条目与 PDF。
+- 打开它，浏览明确选择该旧版路线归档的论文。
+- 它为空或丢失时，重跑 `zotero_add.py` 重建该路线的集合投影。
 
-它**不是**查询主键。找一篇论文仍然按 citekey，与集合无关；集合成员关系是投影，可以随时重建。这样即使你在 Zotero 里大改结构、合并集合、删掉重建，也不会影响 skill 找到东西。
+即使选择该旧版路线，集合也**不是**查询主键；仍按 citekey 找论文。该路线只把自身处理的条目加入 `sounding`，并允许条目同时属于课题集合。`zotero_write.py` / `zotero_add.py` 读取现有 `collections` 后做并集，避免整表替换时移除其他集合。
 
-两条纪律：
+**仅在显式旧版 Zotero PDF 归档路线中，笔记里的 PDF 指针指向这个集合。** 正文头部写两条：`本地 PDF：<Zotero 附件的绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写散落在阅读文件夹里的临时路径——那个路径下次就不在了，而 `sounding` 里的附件才是这份 skill 维护的那一份。
 
-- skill 只往 `sounding` 写，不往里搬别的东西；你自己随手导入的论文不进这个集合，备份边界因此不会被稀释。
-- 一个条目可以同时在 `sounding` 和课题集合里（如 `分子胶新`）。Zotero 的集合是多对多，两边不冲突：课题集合供你按项目浏览，`sounding` 供备份与审计。
+落库的是**重命名副本**：收到 PDF 先按 §2 的 `title` 规则生成重命名名，把副本存到 `zotero.data_dir` 下的 `zotero.collection` 目录（`config.local.json`，本机为 `<data_dir>\sounding`），`zotero_add.py --pdf` 传这个副本。副本文件名 = 重命名名 = 发布笔记标题，三处一致。命名方案与判定（算法类 / 非算法类）见 `SKILL.md` 的「PDF 重命名副本」小节。
 
-`zotero_write.py` / `zotero_add.py` 都只做并集：读取现有 `collections` 再追加，绝不覆盖——写入 `collections` 字段是整表替换，漏读就会把条目从其它集合里踢出去。
-
-**笔记里的 PDF 指针指向这个集合。** 正文头部写两条：`本地 PDF：<Zotero 附件的绝对路径>（Zotero 集合 sounding 内的附件）` 与 `Zotero：zotero://select/library/items/<item key>`。不写散落在阅读文件夹里的临时路径——那个路径下次就不在了，而 `sounding` 里的附件才是这份 skill 维护的那一份。
-
-落库的是**重命名副本**：收到 PDF 先按 §2 的 `title` 规则生成重命名名，把副本存到 `zotero.data_dir` 下的 `zotero.collection` 目录（`config.local.json`，本机为 `<data_dir>\sounding`），`zotero_add.py --pdf` 传这个副本。副本文件名 = 重命名名 = Notion 页面 `标题`，三处一致。命名方案与判定（算法类 / science · review 类）见 `SKILL.md` 的「PDF 重命名副本」小节。
-
-### 6.1 条目不存在时：建条目并挂 PDF
+### 6.1 显式旧版兼容：条目不存在时建条目并挂 PDF
 
 ```bash
 python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
@@ -167,7 +163,7 @@ python scripts/zotero_add.py --pdf "<重命名副本的绝对路径>" \
 
 ### 6.2 条目已存在时：写标签与链接
 
-三件事，缺一不可：
+仅在显式选择 Zotero 回链时执行以下步骤；失败单独报告，不阻塞笔记完成：
 
 1. `Extra` 加一行 `Notion: <页面 URL>`（飞书后端则为 `Feishu: <页面 URL>`）。已有则替换那一行，不要留成两行。
 2. 数据类型写进 Zotero 条目，加前缀：`d:` 数据类型。前缀取自 `config.local.json` → `zotero_tag_prefix`。Zotero 标签是扁平的，前缀是唯一能留住维度的办法。领域那类归口不在这里写——用户在云端表里手填。

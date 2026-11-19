@@ -100,3 +100,13 @@ python scripts/feishu_setup.py --probe --apply   # 记录 CRUD + 文档写入 + 
 - 必填属性缺 → 停，报概念名与字段名。
 - 回读四项有任一不符 → 停，把实测数字打出来（不要只说「可能没写进去」）。
 - 权限错误 → 停，说清是哪个文档要加哪个应用；不要反复重试同一个 403。
+
+## 8 非阻塞 PDF 归档与可选 Zotero
+
+正文和内嵌图片回读成功后，笔记即可完成；源 PDF 上传是独立归档步骤，不是图片上传。先读取已有表的真实 schema，使用实际附件字段/文件机制，不猜字段、不改表结构。当前发布脚本不自动执行源 PDF 归档。上传完成需同一记录回读到真实 attachment/file token；未完成或失败只记 `archival_pending`。本地源/重命名 PDF 始终保留到验证成功，之后也不自动删除。
+
+`run_state.py init --backend feishu` 默认要求 `pdf_prepared`、`note_validated`、`feishu_written`、`images_verified`，并独立跟踪 `pdf_uploaded`；Zotero 不在默认步骤中。`note_complete`、`publication_complete` 与兼容的 `complete` 只看正文和图片；`archival_pending`/`archival_complete` 单独报告。旧状态中的显式 Zotero 步骤继续保留，但不阻塞正文完成。
+
+飞书正文回执绑定完整 destination、source/note SHA256、record_id/readback_record_id、document_id/readback_document_id、实际正文 document_url、readback_checked=true 和 domain_preserved=true；对应 ID 必须一致。图片回执绑定相同正文及实际 block_id；PDF 回执绑定当前 source SHA256、destination、同记录回读及 attachment_token/file_token。回执仅记录真实观察，脚本不会联网代为证明成功。
+
+`--zotero` 是显式可选回链，不自动创建条目、集合成员或上传 PDF。需要旧版 Zotero PDF 归档时另行明确选择；缺条目或 Zotero 操作失败不改变笔记完成状态。

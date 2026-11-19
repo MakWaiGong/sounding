@@ -13,6 +13,10 @@ from pathlib import Path
 import re
 import tempfile
 from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+
+import config
 
 
 STEPS = ("pdf_prepared", "note_validated", "notion_written", "images_verified",
@@ -22,6 +26,22 @@ DEPENDENCIES = {
     "notion_written": ("note_validated",),
     "images_verified": ("notion_written",), "zotero_written": ("notion_written",),
 }
+FEISHU_STEPS = ("pdf_prepared", "note_validated", "feishu_written", "images_verified", "pdf_uploaded")
+ALL_STEPS = ("pdf_prepared", "note_validated", "notion_written", "feishu_written", "images_verified", "pdf_uploaded", "zotero_written")
+PUBLICATION_STEPS = {
+    "feishu": ("pdf_prepared", "note_validated", "feishu_written", "images_verified"),
+    "notion": ("pdf_prepared", "note_validated", "notion_written", "images_verified"),
+}
+ARCHIVAL_STEPS = ("pdf_uploaded", "zotero_written")
+DEPENDENCIES["feishu_written"] = ("note_validated",)
+DEPENDENCIES["pdf_uploaded"] = ()
+
+
+def dependencies(state, step):
+    return tuple("feishu_written" if dep == "notion_written" and state.get("backend") == "feishu" else dep
+                 for dep in DEPENDENCIES[step])
+
+
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -91,8 +111,13 @@ def load_state(path):
         raise ValueError("note_sha256 requires note_path")
     required = state.get("required_steps")
     if (not isinstance(required, list) or not required or
-            any(step not in STEPS for step in required) or len(set(required)) != len(required)):
+            any(step not in ALL_STEPS for step in required) or len(set(required)) != len(required)):
         raise ValueError("required_steps must be a non-empty unique list of known steps")
+    backend = state.get("backend", "notion")
+    if backend not in ("feishu", "notion"):
+        raise ValueError("state backend must be feishu or notion")
+    if ("notion_written" if backend == "feishu" else "feishu_written") in required:
+        raise ValueError("state publication step does not match backend")
     records = state.get("steps")
     if not isinstance(records, dict) or any(step not in required for step in records):
         raise ValueError("state contains unknown or unconfigured steps")
@@ -101,7 +126,7 @@ def load_state(path):
             raise ValueError(f"invalid state for {step}")
         if record.get("source_sha256") != state["source_sha256"]:
             raise ValueError(f"{step} has a different source fingerprint")
-        if step != "pdf_prepared" and record.get("note_sha256") != state.get("note_sha256"):
+        if step not in ("pdf_prepared", "pdf_uploaded") and record.get("note_sha256") != state.get("note_sha256"):
             raise ValueError(f"{step} has a different note fingerprint")
         if record["status"] == "done":
             validate_receipt(state, step, record.get("evidence"), check_files=False)
@@ -110,16 +135,24 @@ def load_state(path):
     return state
 
 
-def init_state(path, citekey, source, note=None, steps=None):
+def init_state(path, citekey, source, note=None, steps=None, backend=None, cfg=None):
     require_text(citekey, "citekey")
     source = Path(source).resolve(strict=True)
     source_hash = file_hash(source)
     old = load_state(path) if Path(path).exists() else None
     if old and old["citekey"] != citekey:
         raise ValueError("run file belongs to a different citekey; use another run file")
-    selected = list(steps or (old["required_steps"] if old else STEPS))
-    if not selected or len(set(selected)) != len(selected) or any(x not in STEPS for x in selected):
-        raise ValueError("steps must be a non-empty unique subset of: " + ", ".join(STEPS))
+    backend = backend or (old.get("backend", "notion") if old else "notion")
+    if backend not in ("feishu", "notion"):
+        raise ValueError("backend must be feishu or notion")
+    target = config.feishu_destination(cfg) if backend == "feishu" else None
+    defaults = FEISHU_STEPS if backend == "feishu" else STEPS
+    selected = list(steps or (old["required_steps"] if old and old.get("backend", "notion") == backend else defaults))
+    wrong_step = "notion_written" if backend == "feishu" else "feishu_written"
+    if wrong_step in selected:
+        raise ValueError("publication step must match backend")
+    if not selected or len(set(selected)) != len(selected) or any(x not in ALL_STEPS for x in selected):
+        raise ValueError("steps must be a non-empty unique subset of: " + ", ".join(ALL_STEPS))
     note_path = str(Path(note).resolve(strict=True)) if note else (old.get("note_path") if old else None)
     note_hash = file_hash(note_path) if note_path else None
     state = copy.deepcopy(old) if old else {
@@ -132,8 +165,11 @@ def init_state(path, citekey, source, note=None, steps=None):
         invalid = list(state["steps"])
         reasons.append("source_changed")
     elif old and old.get("note_sha256") != note_hash:
-        invalid = [s for s in state["steps"] if s != "pdf_prepared"]
+        invalid = [s for s in state["steps"] if s not in ("pdf_prepared", "pdf_uploaded")]
         reasons.append("note_changed")
+    if old and (old.get("backend", "notion") != backend or old.get("destination") != target):
+        invalid += [s for s in state["steps"] if s not in ("pdf_prepared", "note_validated")]
+        reasons.append("publication_destination_changed")
     invalid += [s for s in state["steps"] if s not in selected]
     if old and selected != old["required_steps"]:
         reasons.append("required_steps_changed")
@@ -147,7 +183,7 @@ def init_state(path, citekey, source, note=None, steps=None):
         state["steps"].pop(step, None)
     state.update(source_path=str(source), source_sha256=source_hash,
                  note_path=note_path, note_sha256=note_hash,
-                 required_steps=selected, updated_at=now())
+                 required_steps=selected, backend=backend, destination=target, updated_at=now())
     atomic_json(path, state)
     return status(state)
 
@@ -173,6 +209,23 @@ def validate_receipt(state, step, receipt, check_files=True):
     source_hash = receipt.get("source_sha256", receipt.get("pdf_sha256"))
     if source_hash != state["source_sha256"]:
         raise ValueError("receipt source_sha256/pdf_sha256 does not match this run")
+    if step == "pdf_uploaded":
+        if state.get("backend") != "feishu":
+            raise ValueError("pdf_uploaded is only valid for Feishu archival")
+        target = state.get("destination")
+        if not target or receipt.get("destination") != target:
+            raise ValueError("PDF upload destination must match the configured Feishu target")
+        record_id = require_text(receipt.get("record_id"), "record_id")
+        if receipt.get("readback_record_id") != record_id or receipt.get("readback_checked") is not True:
+            raise ValueError("PDF upload requires same-record readback")
+        published = state["steps"].get("feishu_written", {}).get("evidence", {})
+        if published and published.get("record_id") != record_id:
+            raise ValueError("PDF upload record_id differs from the recorded publication")
+        token = receipt.get("attachment_token") or receipt.get("file_token")
+        token = require_text(token, "attachment_token/file_token")
+        return {"source_sha256": source_hash, "destination": target, "record_id": record_id,
+                "readback_record_id": record_id, "readback_checked": True,
+                "attachment_token": token}
     if step == "pdf_prepared":
         count = receipt.get("page_count")
         if type(count) is not int or count < 1:
@@ -191,12 +244,35 @@ def validate_receipt(state, step, receipt, check_files=True):
         return result
     if receipt.get("readback_checked") is not True:
         raise ValueError("remote receipts require readback_checked=true from an actual readback")
-    page_id = require_text(receipt.get("page_id"), "page_id")
-    result.update(page_id=page_id, readback_checked=True)
+    feishu = state.get("backend") == "feishu"
+    id_field = "document_id" if feishu else "page_id"
+    remote_id = require_text(receipt.get(id_field), id_field)
+    result.update({id_field: remote_id, "readback_checked": True})
     validate_timings(receipt, result)
-    published = state["steps"].get("notion_written", {}).get("evidence", {})
-    if step != "notion_written" and published and published.get("page_id") != page_id:
-        raise ValueError("receipt page_id differs from the recorded Notion page")
+    written_step = "feishu_written" if feishu else "notion_written"
+    published = state["steps"].get(written_step, {}).get("evidence", {})
+    if step != written_step and published and published.get(id_field) != remote_id:
+        raise ValueError(f"receipt {id_field} differs from the recorded publication")
+    if feishu:
+        target = state.get("destination")
+        if not target or receipt.get("destination") != target:
+            raise ValueError("Feishu receipt destination must match the configured target")
+        if receipt.get("readback_document_id") != remote_id:
+            raise ValueError("Feishu requires same-document readback_document_id")
+        result.update(destination=target, readback_document_id=remote_id)
+        if step == "feishu_written":
+            for field in ("record_id", "document_url"):
+                result[field] = require_text(receipt.get(field), field)
+            document_url = urlparse(result["document_url"])
+            if (document_url.scheme != "https" or not document_url.hostname
+                    or not document_url.hostname.endswith(".feishu.cn")
+                    or not document_url.path.startswith(("/docx/", "/wiki/"))):
+                raise ValueError("Feishu document_url must be the actual docx/wiki body, not the Bitable index")
+            if receipt.get("readback_record_id") != result["record_id"]:
+                raise ValueError("Feishu requires same-record readback_record_id")
+            if receipt.get("domain_preserved") is not True:
+                raise ValueError("Feishu requires domain_preserved=true; domain is USER-owned")
+            result.update(readback_record_id=result["record_id"], domain_preserved=True)
     if step == "images_verified":
         images = receipt.get("images")
         if not isinstance(images, list):
@@ -224,7 +300,7 @@ def validate_receipt(state, step, receipt, check_files=True):
 def status(state):
     stale = changed_files(state)
     invalid = set(state["required_steps"] if any(s.startswith("source_") for s in stale) else
-                  [s for s in state["required_steps"] if s != "pdf_prepared"] if stale else [])
+                  [s for s in state["required_steps"] if s not in ("pdf_prepared", "pdf_uploaded")] if stale else [])
     image_record = state["steps"].get("images_verified", {})
     if image_record.get("status") == "done":
         for image in image_record["evidence"]["images"]:
@@ -236,17 +312,27 @@ def status(state):
                 invalid.add("images_verified")
                 stale.append("image_changed_or_unavailable: " + image["path"])
     done = []
-    for step in STEPS:
+    for step in ALL_STEPS:
         if step not in state["required_steps"]:
             continue
-        dependencies = [x for x in DEPENDENCIES[step] if x in state["required_steps"]]
+        required_deps = [x for x in dependencies(state, step) if x in state["required_steps"]]
         if (step not in invalid and state["steps"].get(step, {}).get("status") == "done"
-                and all(x in done for x in dependencies)):
+                and all(x in done for x in required_deps)):
             done.append(step)
     pending = [step for step in state["required_steps"] if step not in done]
+    required_publication = PUBLICATION_STEPS[state.get("backend", "notion")]
+    publication_complete = (set(required_publication).issubset(state["required_steps"]) and
+                            all(step in done for step in required_publication) and
+                            not any(item.startswith(("source_", "note_", "image_")) for item in stale))
+    archival = [step for step in ARCHIVAL_STEPS if step in state["required_steps"]]
+    archival_pending = [step for step in archival if step not in done]
     return {"citekey": state["citekey"], "source_sha256": state["source_sha256"],
             "note_sha256": state.get("note_sha256"), "required_steps": state["required_steps"],
-            "done": done, "pending": pending, "stale": stale, "complete": not pending and not stale,
+            "done": done, "pending": pending, "stale": stale,
+            "note_complete": publication_complete, "publication_complete": publication_complete,
+            "archival_pending": archival_pending, "archival_complete": bool(archival) and not archival_pending,
+            "complete": publication_complete,
+            "backend": state.get("backend", "notion"),
             "verification": "Recorded observations only; no remote services were contacted."}
 
 
@@ -264,15 +350,18 @@ def record_step(path, step, evidence=None, failure=None):
         record.update(status="failed", error=require_text(failure, "failure"))
     else:
         current = status(state)
-        for dependency in DEPENDENCIES[step]:
+        for dependency in dependencies(state, step):
             if dependency in state["required_steps"] and dependency not in current["done"]:
                 raise ValueError(f"record {dependency} successfully before {step}")
         record.update(status="done", evidence=validate_receipt(state, step, evidence))
     # Re-running an upstream operation invalidates downstream acknowledgements,
     # even when the Markdown bytes stayed the same (e.g. a replaced Notion page).
     affected = {step}
-    for candidate in STEPS:
-        if any(dep in affected for dep in DEPENDENCIES[candidate]):
+    archived = state["steps"].get("pdf_uploaded", {}).get("evidence", {})
+    if step == "feishu_written" and archived and archived.get("record_id") != record["evidence"]["record_id"]:
+        affected.add("pdf_uploaded")
+    for candidate in ALL_STEPS:
+        if any(dep in affected for dep in dependencies(state, candidate)):
             affected.add(candidate)
     for candidate in affected - {step}:
         state["steps"].pop(candidate, None)
@@ -290,12 +379,14 @@ def main(argv=None):
     init.add_argument("--citekey", required=True)
     init.add_argument("--source", required=True)
     init.add_argument("--note")
-    init.add_argument("--steps", help="Comma-separated subset of " + ",".join(STEPS))
+    init.add_argument("--backend", choices=("feishu", "notion"), help="Defaults to selected config backend for new runs")
+    init.add_argument("--config")
+    init.add_argument("--steps", help="Comma-separated subset of " + ",".join(ALL_STEPS))
     show = sub.add_parser("status", help="Show effective completion and pending steps")
     show.add_argument("--file", required=True)
     record = sub.add_parser("record", help="Record an observed result or a failed step")
     record.add_argument("--file", required=True)
-    record.add_argument("--step", choices=STEPS, required=True)
+    record.add_argument("--step", choices=ALL_STEPS, required=True)
     receipts = record.add_mutually_exclusive_group(required=True)
     receipts.add_argument("--evidence", help="JSON receipt path (paths inside are relative to this file)")
     receipts.add_argument("--failed", help="Failure reason; the step remains pending")
@@ -303,7 +394,10 @@ def main(argv=None):
     try:
         if args.command == "init":
             selected = args.steps.split(",") if args.steps is not None else None
-            result = init_state(args.file, args.citekey, args.source, args.note, selected)
+            cfg = config.load(args.config)
+            old = load_state(args.file) if Path(args.file).exists() else None
+            backend = args.backend or (old.get("backend", "notion") if old else config.publishing_backend(cfg))
+            result = init_state(args.file, args.citekey, args.source, args.note, selected, backend, cfg)
         elif args.command == "status":
             result = status(load_state(args.file))
         else:

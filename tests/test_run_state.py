@@ -122,7 +122,8 @@ class RunStateTests(unittest.TestCase):
         run_state.init_state(self.path, "paper-key", self.source, steps=["pdf_prepared"])
         run_state.record_step(self.path, "pdf_prepared", self.receipt("pdf_prepared"))
         result = run_state.status(run_state.load_state(self.path))
-        self.assertTrue(result["complete"])
+        self.assertFalse(result["complete"])
+        self.assertFalse(result["publication_complete"])
         self.assertEqual(result["done"], ["pdf_prepared"])
         with self.assertRaisesRegex(ValueError, "not configured"):
             run_state.record_step(self.path, "notion_written", self.receipt("notion_written"))

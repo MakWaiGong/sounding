@@ -250,6 +250,14 @@ def write_zotero(citekey, url, tags, timings, title=None, alt_titles=()):
     return f"written: {key}"
 
 
+def optional_zotero(props, url, tags, timings):
+    try:
+        return write_zotero(props["citekey"], url, tags, timings, props["title"],
+                            props.get("alt_titles") or ())
+    except Exception as exc:
+        return f"failed ({type(exc).__name__}); note published, backlink pending"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Publish one note into the Feishu library.")
     ap.add_argument("note", help="path to notes/<citekey>.md")
@@ -374,16 +382,12 @@ def main():
             sys.exit(f"回读不通过：{expectations} blocks={len(blocks)} text={len(text)} "
                      f"images={images}/{len(figures)} tables={tables}")
 
-        zotero = "not requested"
-        if args.zotero:
-            zotero = write_zotero(props["citekey"], url, tags, timings, props["title"],
-                                  props.get("alt_titles") or ())
-
         index[props["citekey"]] = {
             "doc_id": doc_id, "url": url, "record_id": record_id,
             "rev": props["rev"], "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
         save_json(index_path, index)
+        zotero = optional_zotero(props, url, tags, timings) if args.zotero else "not requested"
         print(json.dumps({
             "citekey": props["citekey"], "action": action, "doc": doc_id, "url": url,
             "record": record_id, "blocks": len(blocks), "images": images,
