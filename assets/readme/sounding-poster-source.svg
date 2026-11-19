@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1832" height="859" viewBox="0 0 1832 859" role="img" aria-labelledby="poster-title poster-desc">
   <title id="poster-title">观潮 / Sounding</title>
-  <desc id="poster-desc">翻涌的浪潮之下，远景、中景与前景的多次独立测深共同勾勒海床。</desc>
+  <desc id="poster-desc">翻涌的浪潮之下，多条测深线落在右侧海床的不同深度，底端的光点标识测量位置。</desc>
   <defs>
     <linearGradient id="shade-x" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1150" y2="0">
       <stop offset="0" stop-color="#061824" stop-opacity="0.8"/>
@@ -14,67 +14,45 @@
       <stop offset="0.9313154831" stop-color="white" stop-opacity="0"/>
     </linearGradient>
     <mask id="title-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="1150" height="859"><rect width="1150" height="859" fill="url(#shade-y)"/></mask>
+    <radialGradient id="seabed-glow">
+      <stop offset="0" stop-color="#ffe1a5" stop-opacity="0.63"/>
+      <stop offset="0.22" stop-color="#ffe1a5" stop-opacity="0.46"/>
+      <stop offset="1" stop-color="#ffe1a5" stop-opacity="0"/>
+    </radialGradient>
   </defs>
   <image href="sounding-poster-background.png" xlink:href="sounding-poster-background.png" x="0" y="0" width="1832" height="859"/>
-  <g id="additional-soundings" aria-label="远景、中景和前景的独立测深线">
-    <g class="distance" opacity="0.21"><path d="M 66 357 V 623" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="66" cy="623" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 136 346 V 638" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="136" cy="638" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 211 351 V 629" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="211" cy="629" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 315 372 V 622" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="315" cy="622" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 374 349 V 592" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="374" cy="592" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 459 380 V 582" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="459" cy="582" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 554 349 V 594" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="554" cy="594" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 625 351 V 572" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="625" cy="572" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 696 346 V 595" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="696" cy="595" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 778 338 V 593" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="778" cy="593" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 881 346 V 582" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="881" cy="582" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 948 332 V 538" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="948" cy="538" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1023 331 V 549" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1023" cy="549" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1108 320 V 535" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1108" cy="535" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1192 332 V 535" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1192" cy="535" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1286 336 V 535" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1286" cy="535" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1374 320 V 573" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1374" cy="573" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1446 325 V 594" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1446" cy="594" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1515 320 V 621" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1515" cy="621" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1628 320 V 631" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1628" cy="631" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1681 332 V 651" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1681" cy="651" r="2.5" fill="#e8dcbe"/></g>
-    <g class="distance" opacity="0.21"><path d="M 1763 320 V 644" fill="none" stroke="#e8dcbe" stroke-width="0.9"/><circle cx="1763" cy="644" r="2.5" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 57 335 V 723" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="57" cy="723" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 161 351 V 701" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="161" cy="701" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 255 347 V 680" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="255" cy="680" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 359 346 V 666" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="359" cy="666" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 442 372 V 655" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="442" cy="655" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 517 372 V 643" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="517" cy="643" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 624 362 V 659" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="624" cy="659" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 731 348 V 647" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="731" cy="647" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 813 333 V 640" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="813" cy="640" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 903 339 V 621" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="903" cy="621" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1022 334 V 599" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1022" cy="599" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1111 326 V 604" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1111" cy="604" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1217 320 V 605" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1217" cy="605" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1289 320 V 618" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1289" cy="618" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1383 325 V 615" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1383" cy="615" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1488 320 V 667" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1488" cy="667" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1595 327 V 711" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1595" cy="711" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1696 320 V 709" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1696" cy="709" r="3.0" fill="#e8dcbe"/></g>
-    <g class="middle" opacity="0.36"><path d="M 1792 322 V 681" fill="none" stroke="#e8dcbe" stroke-width="1.1"/><circle cx="1792" cy="681" r="3.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 67 357 V 788" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="67" cy="788" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 171 357 V 764" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="171" cy="764" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 309 371 V 738" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="309" cy="738" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 424 364 V 716" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="424" cy="716" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 560 369 V 717" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="560" cy="717" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 662 344 V 710" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="662" cy="710" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 809 350 V 719" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="809" cy="719" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 905 358 V 712" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="905" cy="712" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1049 324 V 665" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1049" cy="665" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1158 320 V 662" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1158" cy="662" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1294 320 V 690" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1294" cy="690" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1407 320 V 706" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1407" cy="706" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1525 320 V 767" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1525" cy="767" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1651 323 V 789" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1651" cy="789" r="4.0" fill="#e8dcbe"/></g>
-    <g class="foreground" opacity="0.58"><path d="M 1768 320 V 771" fill="none" stroke="#e8dcbe" stroke-width="1.45"/><circle cx="1768" cy="771" r="4.0" fill="#e8dcbe"/></g>
-  </g>
   <rect width="1150" height="859" fill="url(#shade-x)" mask="url(#title-mask)"/>
+  <g id="seabed-soundings" aria-label="测深线落在右侧海床，底端光点标识测量位置">
+    <g class="far"><path d="M 855 341 V 610" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="855" cy="610" r="9" fill="url(#seabed-glow)"/><circle cx="855" cy="610" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 886 334 V 678" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="886" cy="678" r="12" fill="url(#seabed-glow)"/><circle cx="886" cy="678" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 915 347 V 740" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="915" cy="740" r="15" fill="url(#seabed-glow)"/><circle cx="915" cy="740" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 965 335 V 704" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="965" cy="704" r="9" fill="url(#seabed-glow)"/><circle cx="965" cy="704" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 995 335 V 720" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="995" cy="720" r="12" fill="url(#seabed-glow)"/><circle cx="995" cy="720" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1027 335 V 708" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1027" cy="708" r="15" fill="url(#seabed-glow)"/><circle cx="1027" cy="708" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1055 323 V 652" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1055" cy="652" r="9" fill="url(#seabed-glow)"/><circle cx="1055" cy="652" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1082 342 V 651" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1082" cy="651" r="12" fill="url(#seabed-glow)"/><circle cx="1082" cy="651" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1112 331 V 677" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1112" cy="677" r="15" fill="url(#seabed-glow)"/><circle cx="1112" cy="677" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1165 335 V 606" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1165" cy="606" r="9" fill="url(#seabed-glow)"/><circle cx="1165" cy="606" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1194 349 V 640" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1194" cy="640" r="12" fill="url(#seabed-glow)"/><circle cx="1194" cy="640" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1223 341 V 664" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1223" cy="664" r="15" fill="url(#seabed-glow)"/><circle cx="1223" cy="664" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1255 327 V 589" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1255" cy="589" r="9" fill="url(#seabed-glow)"/><circle cx="1255" cy="589" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1280 342 V 617" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1280" cy="617" r="12" fill="url(#seabed-glow)"/><circle cx="1280" cy="617" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1310 348 V 613" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1310" cy="613" r="15" fill="url(#seabed-glow)"/><circle cx="1310" cy="613" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1336 338 V 553" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1336" cy="553" r="9" fill="url(#seabed-glow)"/><circle cx="1336" cy="553" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1362 346 V 542" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1362" cy="542" r="12" fill="url(#seabed-glow)"/><circle cx="1362" cy="542" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1420 345 V 531" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1420" cy="531" r="15" fill="url(#seabed-glow)"/><circle cx="1420" cy="531" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1450 344 V 503" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1450" cy="503" r="9" fill="url(#seabed-glow)"/><circle cx="1450" cy="503" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1480 341 V 532" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1480" cy="532" r="12" fill="url(#seabed-glow)"/><circle cx="1480" cy="532" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1510 347 V 557" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1510" cy="557" r="15" fill="url(#seabed-glow)"/><circle cx="1510" cy="557" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1536 343 V 535" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1536" cy="535" r="9" fill="url(#seabed-glow)"/><circle cx="1536" cy="535" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1588 356 V 570" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1588" cy="570" r="12" fill="url(#seabed-glow)"/><circle cx="1588" cy="570" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1616 330 V 617" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1616" cy="617" r="15" fill="url(#seabed-glow)"/><circle cx="1616" cy="617" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1642 352 V 580" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1642" cy="580" r="9" fill="url(#seabed-glow)"/><circle cx="1642" cy="580" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1668 335 V 629" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1668" cy="629" r="12" fill="url(#seabed-glow)"/><circle cx="1668" cy="629" r="2.3" fill="#fff9e6"/></g>
+    <g class="foreground"><path d="M 1725 345 V 667" fill="none" stroke="#e0e7da" stroke-width="1.4" opacity="0.62"/><circle cx="1725" cy="667" r="15" fill="url(#seabed-glow)"/><circle cx="1725" cy="667" r="2.9" fill="#fff9e6"/></g>
+    <g class="far"><path d="M 1750 335 V 629" fill="none" stroke="#e0e7da" stroke-width="0.9" opacity="0.32"/><circle cx="1750" cy="629" r="9" fill="url(#seabed-glow)"/><circle cx="1750" cy="629" r="1.8" fill="#fff9e6"/></g>
+    <g class="middle"><path d="M 1780 351 V 629" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1780" cy="629" r="12" fill="url(#seabed-glow)"/><circle cx="1780" cy="629" r="2.3" fill="#fff9e6"/></g>
+  </g>
   <text x="112" y="360" fill="#f5f0e1" font-family="STZhongsong, STSong, Songti SC, SimSun, serif" font-size="158">观潮</text>
   <text x="458" y="350" fill="#f5f0e1" font-family="Georgia, Times New Roman, serif" font-size="64" letter-spacing="4">SOUNDING</text>
   <text x="112" y="490" fill="#f5f0e1" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="68" font-weight="700">读懂一篇，看清一片</text>
