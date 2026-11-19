@@ -28,9 +28,9 @@ TEXT, NUMBER, SINGLE, MULTI, URL, LINK = 1, 2, 3, 4, 15, 18
 PAPER_FIELDS = [
     ("标题", TEXT),
     ("citekey", TEXT),
-    ("发表", TEXT),
+    ("期刊", TEXT),
     ("DOI", TEXT),
-    ("年份", NUMBER),
+    ("发表时间", TEXT),
     ("类型", SINGLE),
     ("读法", SINGLE),
     ("角色", SINGLE),
@@ -71,8 +71,8 @@ TABLES = {
 CONCEPT_TO_FIELD = {
     "title": "标题",
     "citekey": "citekey",
-    "venue": "发表",
-    "year": "年份",
+    "venue": "期刊",
+    "year": "发表时间",
     "type": "类型",
     "reading": "读法",
     "doi": "DOI",
@@ -93,9 +93,9 @@ CONCEPT_TO_FIELD = {
 SELECT_FIELDS = {"类型", "读法", "角色"}
 MULTI_FIELDS = {"数据类型"}
 LINK_FIELDS = {name for name, _ in PAPER_LINKS}
-NUMBER_FIELDS = {"年份"}
+NUMBER_FIELDS = set()
 URL_FIELDS = {"笔记"}
-TEXT_FIELDS = {"标题", "citekey", "发表", "DOI", "开创了什么", "世代名"}
+TEXT_FIELDS = {name for name, ftype in PAPER_FIELDS if ftype == TEXT}
 
 
 def field_spec(name, ftype):

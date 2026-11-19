@@ -41,8 +41,8 @@ import feishu_schema as fschema  # noqa: E402
 WORKSPACE = "notes/.feishu-workspace.json"
 INDEX = "notes/.feishu-index.json"
 
-HEADER = re.compile(r"^(标题|发表|类型|citekey|年份|本地 PDF|Zotero)\s*[：:]\s*(.+?)\s*$")
-YEAR_AT_END = re.compile(r"\((\d{4})\)\s*$")
+HEADER = re.compile(r"^(标题|发表时间|发表|期刊|类型|citekey|年份|本地 PDF|Zotero)\s*[：:]\s*(.+?)\s*$")
+YEAR_AT_END = re.compile(r"[(]([0-9]{4})(?:-(0[1-9]|1[0-2]))?[)][ ]*$")
 VERDICT = re.compile(r"去留[：:]\s*([^\s。]+)")
 DOI = re.compile(r"10\.\d{4,9}/[^\s·，,;；]+")
 MIGRATION = re.compile(r"^迁移[：:]\s*.+$", re.M)
@@ -67,6 +67,15 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def normalize_publication_time(value):
+    if value is None or value == "":
+        return None
+    value = str(value).strip()
+    if not re.fullmatch(r"[1-9][0-9]{3}(?:-(?:0[1-9]|1[0-2]))?", value):
+        raise ValueError("发表时间 must be YYYY-MM, or YYYY when the month is unknown")
+    return value
+
+
 def parse_note(path):
     """Front matter plus the verdict line; nothing is invented."""
     with open(path, encoding="utf-8") as f:
@@ -77,11 +86,17 @@ def parse_note(path):
         m = HEADER.match(line)
         if m:
             head[m.group(1)] = m.group(2).strip("` ")
-    venue_raw = head.get("发表", "")
+    venue_raw = head.get("期刊") or head.get("发表", "")
     m = YEAR_AT_END.search(venue_raw)
     year = int(m.group(1)) if m else None
     if year is None and head.get("年份", "").isdigit():
         year = int(head["年份"])
+    inferred_time = (f"{year:04d}-{m.group(2)}" if m and m.group(2) else str(year)) if year is not None else None
+    publication_time = normalize_publication_time(head.get("发表时间") or inferred_time)
+    if publication_time:
+        if year is not None and year != int(publication_time[:4]):
+            raise ValueError("发表时间 conflicts with the publication year")
+        year = int(publication_time[:4])
     # Only the trailing (year) is the year; a venue may carry its own, e.g.
     # "Cell (2003) (2026)" means the Cell paper, published in 2026.
     venue = (venue_raw[:m.start()] if m else venue_raw).strip() or None
@@ -113,6 +128,7 @@ def parse_note(path):
         "alt_titles": alt_titles,
         "venue": venue,
         "year": year,
+        "publication_time": publication_time,
         "type": head.get("类型"),
         "doi": doi,
         "verdict": verdict,
@@ -173,7 +189,7 @@ def missing(props, tags):
 
 
 def report_missing(gaps):
-    names = {"title": "标题", "venue": "发表", "year": "年份", "type": "类型",
+    names = {"title": "标题", "venue": "期刊", "year": "发表时间", "type": "类型",
              "citekey": "citekey", "data": "数据类型"}
     lines = ["缺字段："]
     for concept in gaps:
@@ -182,12 +198,25 @@ def report_missing(gaps):
     return "\n".join(lines)
 
 
+def preserve_publication_time(fields, existing):
+    fields = dict(fields)
+    incoming = fields.get("发表时间")
+    old = existing.get("发表时间")
+    if isinstance(old, list):
+        old = "".join(x.get("text", "") if isinstance(x, dict) else str(x) for x in old)
+    if isinstance(incoming, str) and re.fullmatch(r"[1-9][0-9]{3}", incoming) and isinstance(old, str) and len(old) > 4:
+        if not old.startswith(incoming):
+            raise ValueError("Existing publication time conflicts with the incoming year")
+        fields.pop("发表时间", None)
+    return fields
+
+
 def record_fields(props, tags, url):
     fields = {
         "标题": props["title"],
         "citekey": props["citekey"],
-        "发表": props["venue"],
-        "年份": props["year"],
+        "期刊": props["venue"],
+        "发表时间": props.get("publication_time") or (str(props["year"]) if props.get("year") is not None else None),
         "类型": props["type"],
     }
     if props.get("doi"):
@@ -331,6 +360,10 @@ def main():
             ids = [r.get("record_id") for r in rows]
             sys.exit(f"库里有多行同 citekey {props['citekey']}：{ids}；先合并再发布")
 
+        fields = record_fields(props, tags, None)
+        if rows:
+            fields = preserve_publication_time(fields, rows[0].get("fields") or {})
+
         doc_id = entry.get("doc_id")
         if not doc_id:
             started = time.time()
@@ -355,7 +388,7 @@ def main():
         url = fc.doc_url(doc_id)
         fc.grant_public_access(doc_id)
 
-        fields = record_fields(props, tags, url)
+        fields["笔记"] = {"link": url, "text": "笔记"}
         record_id = rows[0].get("record_id") if rows else None
         started = time.time()
         if record_id:

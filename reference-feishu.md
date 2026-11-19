@@ -19,7 +19,7 @@ python scripts/publish.py notes/<citekey>.md \
 ```
 
 - `--data`：数据类型，逗号分隔，值是 `reference-tags.md` 里的词。缺了就是缺字段，脚本报出概念名后停（`reference-library.md` §3），不会静默丢。领域不在命令行里——它是表里由用户手填的链接列，脚本不写不查。
-- `--read`：`扫` / `精读`，默认 `精读`。
+- `--read`：旧命令兼容入口，参数会忽略；“读法”仅由用户填写。
 - `--zotero`：写 `Extra: Feishu: <url>` 和 `d:` 前缀的数据类型标签。条目不在库里时跳过并说明，不新建条目——建条目是 `zotero_add.py` 的事。
 - `--dry-run`：只打印计划（解析出的属性、要不要新建、缺什么），不写。
 - `--allow-partial`：确实要留空发布时才用；正常流程不用。
@@ -28,7 +28,7 @@ python scripts/publish.py notes/<citekey>.md \
 
 ## 2 脚本做了什么
 
-1. 解析笔记头四行（`标题` / `发表` / `类型` / `citekey`）、`## 定位素材` 里 `原文：` 行的 DOI，速览第 1 行起的编号行；`发表` 末尾的 `(2026)` 是年份，`年份` 字段由它派生。`去留` 不再进表，只留在笔记速览第 10 行。
+1. 解析笔记头（兼容 `发表`，也支持 `期刊`；`发表时间：YYYY-MM` 为可选头）及 `## 定位素材` 的 DOI。飞书列名是 `期刊` / `发表时间`；只有年份时写年份文本，已存在的完整年月不会被年份值降级。年份冲突在创建或重写正文之前报错。`去留` 只留在笔记速览第 10 行，不进表。
 2. 按 citekey **精确**查 `Papers`：1 行更新、0 行新建、多行停下报 record_id（`reference-library.md` §4）。
 3. 有记录就复用 `notes/.feishu-index.json` 里的 doc_id，先清空正文再整篇重写——笔记是重建的，不是打补丁。
 4. 图从 `notes/figs/<citekey>/manifest.json` 取，插到**解释它的那段叙述之后**：先剔除不叙述的行（`PDF 与来源`、速览、符号表、指标、与已读的关系、待查、定位素材、实验清单、参考文献、表格行、代码块），再取该图第一个可用提及所在段落/列表项的末尾插入；同一段提到多张图时按提及顺序分散，后一张顺延到下一次叙述提及，正文完全没提的图落文末（`Extended Data` / `Supplementary` 的提及跳过）。
@@ -110,3 +110,7 @@ python scripts/feishu_setup.py --probe --apply   # 记录 CRUD + 文档写入 + 
 飞书正文回执绑定完整 destination、source/note SHA256、record_id/readback_record_id、document_id/readback_document_id、实际正文 document_url、readback_checked=true 和 domain_preserved=true；对应 ID 必须一致。图片回执绑定相同正文及实际 block_id；PDF 回执绑定当前 source SHA256、destination、同记录回读及 attachment_token/file_token。回执仅记录真实观察，脚本不会联网代为证明成功。
 
 `--zotero` 是显式可选回链，不自动创建条目、集合成员或上传 PDF。需要旧版 Zotero PDF 归档时另行明确选择；缺条目或 Zotero 操作失败不改变笔记完成状态。
+
+## 9 发表时间与期刊
+
+飞书论文表的“期刊”为文本，保留原“发表”列的期刊/会议内容；“发表时间”为文本，明确月份时写 YYYY-MM。历史仅有年份时保留 YYYY，原为空仍为空，不猜月份或某一天。旧笔记头“发表：刊名 (年份)”继续兼容；也支持“期刊：刊名”和可选头“发表时间：YYYY-MM”，冲突年份或非法月份会拒绝。内部整数 year 保留给可选书目回链。

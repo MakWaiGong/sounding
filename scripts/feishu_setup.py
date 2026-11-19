@@ -147,7 +147,7 @@ def probe(client, app_token, table_id, folder):
     ok = True
     try:
         rec = client.create_record(app_token, table_id, {
-            "标题": "sounding probe", "citekey": PROBE_CITEKEY, "年份": 2026,
+            "标题": "sounding probe", "citekey": PROBE_CITEKEY, "发表时间": "2026",
             "类型": "other", "数据类型": ["benchmark-only"],
         })
         rid = rec["record_id"]

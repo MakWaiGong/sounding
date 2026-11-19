@@ -128,5 +128,99 @@ class PublishNoteTests(unittest.TestCase):
         self.assertEqual(fields["数据类型"], ["PDB"])
 
 
+    def test_legacy_year_maps_to_renamed_text_fields(self):
+        props = publish.parse_note(str(self.path))
+        fields = publish.record_fields(props, {"data": ["PDB"]}, "url")
+        self.assertEqual(fields["期刊"], props["venue"])
+        self.assertEqual(fields["发表时间"], str(props["year"]))
+        self.assertNotIn("发表", fields)
+        self.assertNotIn("年份", fields)
+
+    def test_explicit_year_month_is_preserved(self):
+        year = publish.parse_note(str(self.path))["year"]
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        lines.insert(4, f"发表时间：{year}-07")
+        self.path.write_text(chr(10).join(lines), encoding="utf-8")
+        props = publish.parse_note(str(self.path))
+        self.assertEqual(props["publication_time"], f"{year}-07")
+        self.assertEqual(publish.record_fields(props, {}, "url")["发表时间"], f"{year}-07")
+
+    def test_new_venue_header_is_supported(self):
+        text = self.path.read_text(encoding="utf-8")
+        expected = publish.parse_note(str(self.path))["venue"]
+        self.path.write_text(text.replace("发表：", "期刊："), encoding="utf-8")
+        self.assertEqual(publish.parse_note(str(self.path))["venue"], expected)
+
+    def test_invalid_publication_month_is_rejected(self):
+        for value in ("2026-00", "2026-13", "2026-1", "2026-07-01", "invalid"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                publish.normalize_publication_time(value)
+
+    def test_conflicting_publication_year_is_rejected(self):
+        year = publish.parse_note(str(self.path))["year"]
+        lines = self.path.read_text(encoding="utf-8").splitlines()
+        lines.insert(4, f"发表时间：{year - 1}-07")
+        self.path.write_text(chr(10).join(lines), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            publish.parse_note(str(self.path))
+
+    def test_schema_publication_time_is_text(self):
+        import feishu_schema
+        fields = dict(feishu_schema.PAPER_FIELDS)
+        self.assertEqual(fields["期刊"], feishu_schema.TEXT)
+        self.assertEqual(fields["发表时间"], feishu_schema.TEXT)
+        self.assertNotIn("年份", fields)
+
+
+    def test_year_only_update_preserves_existing_month(self):
+        fields = publish.preserve_publication_time({"发表时间": "2026", "期刊": "ICML"}, {"发表时间": "2026-07"})
+        self.assertNotIn("发表时间", fields)
+        self.assertEqual(fields["期刊"], "ICML")
+
+    def test_explicit_month_update_is_not_dropped(self):
+        fields = publish.preserve_publication_time({"发表时间": "2026-08"}, {"发表时间": "2026-07"})
+        self.assertEqual(fields["发表时间"], "2026-08")
+
+    def test_existing_month_with_conflicting_year_is_not_overwritten(self):
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            publish.preserve_publication_time({"发表时间": "2025"}, {"发表时间": "2026-07"})
+
+
+    def test_text_classification_matches_schema(self):
+        import feishu_schema
+        expected = {name for name, ftype in feishu_schema.PAPER_FIELDS if ftype == feishu_schema.TEXT}
+        self.assertEqual(feishu_schema.TEXT_FIELDS, expected)
+        self.assertTrue({"期刊", "发表时间"}.issubset(feishu_schema.TEXT_FIELDS))
+
+    def test_legacy_venue_suffix_can_include_month(self):
+        text = self.path.read_text(encoding="utf-8")
+        self.path.write_text(text.replace("(2026)", "(2026-07)", 1), encoding="utf-8")
+        props = publish.parse_note(str(self.path))
+        self.assertEqual(props["publication_time"], "2026-07")
+        self.assertEqual(props["venue"], "Nature Communications")
+
+    def test_year_conflict_stops_before_remote_document_changes(self):
+        from contextlib import ExitStack, redirect_stderr
+        from io import StringIO
+        from unittest.mock import patch, MagicMock
+        client = MagicMock()
+        workspace = {"app_token": "app", "folder_token": "folder", "tables": {"papers": "table"}}
+        rows = [{"record_id": "record", "fields": {"发表时间": "2025-07"}}]
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.path), "--data", "PDB"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={}))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[workspace, {}]))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=rows))
+            body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            with self.assertRaisesRegex(ValueError, "conflicts"):
+                publish.main()
+        client.create_doc.assert_not_called()
+        body.assert_not_called()
+        client.update_record.assert_not_called()
+        client.create_record.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
