@@ -1,5 +1,9 @@
 # 落库：飞书后端
 
+**归档专用**：仅明确保存云端时执行本文件的配置、探针、写入、上传与回读。普通阅读默认文本，不因归档条件受阻；归档复用已有完整解读，不重做 sounding。
+
+现有用户库只按真实 schema 操作，不跑 `--apply` 恢复已删列。旧探针若会写读法或已删字段则不直接执行；隔离探针只操作自己新建的临时记录，省略领域／读法并清理。实际没有“数据类型”列时不传 `--data`；仅在 dry-run 确认唯一缺项为该已删概念、其他必填元信息完整时，才用 `--allow-partial` 兼容发布，不能放过其他真正缺项。
+
 飞书是 `publish.py` 的第二条发布路径：一篇笔记 = 多维表格里一行 `Papers` + 一篇云文档正文。和 Notion 那条路径的区别在**谁解析 markdown**：Notion MCP 直接吃 notion-flavored markdown，飞书要自己转成 block，所以这件事必须由脚本做，不能由 agent 手搓 API。
 
 ## 0 先用私有配置验证应用身份
@@ -28,7 +32,7 @@ python scripts/publish.py notes/<citekey>.md \
 
 ## 2 脚本做了什么
 
-1. 解析笔记头（兼容 `发表`，也支持 `期刊`；`发表时间：YYYY-MM` 为可选头）及 `## 定位素材` 的 DOI。飞书列名是 `期刊` / `发表时间`；只有年份时写年份文本，已存在的完整年月不会被年份值降级。年份冲突在创建或重写正文之前报错。`去留` 只留在笔记速览第 10 行，不进表。
+1. 解析笔记头（兼容 `发表`，也支持 `期刊`；`发表时间：YYYY-MM` 为可选头）及 `## 定位素材` 的 DOI。飞书列名是 `期刊` / `发表时间`；只有年份时写年份文本，已存在的完整年月不会被年份值降级。年份冲突在创建或重写正文之前报错。速览按正文骨架浓缩，不固定第十行为 `去留`；如正文已有去留收口，可在对应压缩句保留，但不进表。
 2. 按 citekey **精确**查 `Papers`：1 行更新、0 行新建、多行停下报 record_id（`reference-library.md` §4）。
 3. 有记录就复用 `notes/.feishu-index.json` 里的 doc_id，先清空正文再整篇重写——笔记是重建的，不是打补丁。
 4. 图从 `notes/figs/<citekey>/manifest.json` 取，插到**解释它的那段叙述之后**：先剔除不叙述的行（`PDF 与来源`、速览、符号表、指标、与已读的关系、待查、定位素材、实验清单、参考文献、表格行、代码块），再取该图第一个可用提及所在段落/列表项的末尾插入；同一段提到多张图时按提及顺序分散，后一张顺延到下一次叙述提及，正文完全没提的图落文末（`Extended Data` / `Supplementary` 的提及跳过）。
@@ -59,7 +63,7 @@ python scripts/feishu_setup.py --probe --apply   # 记录 CRUD + 文档写入 + 
 ## 4 文档形态
 
 - 正文由 `blocks/convert`（`content_type: markdown`）转块后插入；返回的 `block_id` / `parent_id` / `children` 必须剥掉再插，否则 `1770001`。
-- **速览做成 callout**（`block_type 19`）：`background_color` / `border_color` 用 light blue（5）、`emoji_id: "pushpin"`。callout 创建时自带 1 个空 text 子块，第一行复用这个子块、其余走 `append_block_children`；`去留` 行按值着色（值得跟进=绿 4 / 存档=灰 7 / 仅作背景=橙 2）——这一行只存在于笔记与 callout 里，不进库表。
+- **速览做成 callout**（`block_type 19`）：`background_color` / `border_color` 用 light blue（5）、`emoji_id: "pushpin"`。callout 创建时自带 1 个空 text 子块，第一行复用这个子块、其余走 `append_block_children`；若出现与正文一致的 `去留` 行，则按值着色（值得跟进=绿 4 / 存档=灰 7 / 仅作背景=橙 2）——这一行只存在于笔记与 callout 里，不进库表。
 - **公式**：笔记里直接写 `$...$`（行内）或 `$$...$$`（独占一行）。`blocks/convert` 会把它转成 text 块里的 equation 元素（`{"equation": {"content": ...}}`），不需要新块类型；表格 cell、callout 首行、图注都走同一个 `inline_elements` 切分。
 - **图注**：`manifest.json` 每张图可加一条 `图注：Fig. N —— <解释>` 写在 `## 定位素材` 下，渲染成图片正下方的灰色斜体 text 块（`text_color: 7`），块内容形如 `Fig. N　<解释>（原 PDF 第 N 页）`；没有图注就只写 `Fig. N（原 PDF 第 N 页）`。图注行不会重复进正文。
 - **标题着色**：convert 出的 heading 块做后处理，给每个 text_run 设 `text_element_style.text_color`——H1/H2=蓝 5、H3=紫 6、H4=灰 7。

@@ -1,7 +1,4 @@
+# Text reading and Feishu archival do not require Notion.
+# Connect the official Notion MCP only for explicitly selected Notion archival.
 dependencies:
-  tools:
-    - type: "mcp"
-      value: "notion"
-      description: "Publish and verify reading notes in the user's Notion Papers database"
-      transport: "streamable_http"
-      url: "https://mcp.notion.com/mcp"
+  tools: []
