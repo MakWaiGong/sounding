@@ -30,7 +30,9 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
@@ -62,9 +64,18 @@ def load_json(path, default):
 
 
 def save_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".feishu-index-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def normalize_publication_time(value):
@@ -239,6 +250,39 @@ def find_papers(fc, ws, citekey):
                              [("citekey", "is", [citekey])])
 
 
+def existing_note_doc_id(fields, fcfg):
+    """Resolve an existing row link without accepting another tenant or path."""
+    note = fields.get("笔记") if isinstance(fields, dict) else None
+    link = note.get("link") if isinstance(note, dict) else None
+    error = "Existing row has no unambiguous trusted Feishu docx note link"
+    if (not isinstance(link, str) or not link
+            or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c == "\\" for c in link)):
+        raise ValueError(error)
+    try:
+        parsed = urlsplit(link)
+    except ValueError:
+        raise ValueError(error) from None
+    match = re.fullmatch(r"/docx/([A-Za-z0-9_-]+)", parsed.path)
+    if not match:
+        raise ValueError(error)
+    if not parsed.scheme and not parsed.netloc and not link.startswith("/docx/"):
+        raise ValueError(error)
+    if parsed.scheme or parsed.netloc:
+        domain = fcfg.get("domain")
+        if not domain and fcfg.get("destination_url"):
+            try:
+                destination = config.feishu_destination({"feishu": fcfg})
+                domain = urlsplit(destination["destination_url"]).hostname
+            except ValueError:
+                raise ValueError(error) from None
+        if (not isinstance(domain, str) or len(domain) > 253
+                or not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+feishu\.cn",
+                                    domain, re.IGNORECASE | re.ASCII)
+                or parsed.scheme != "https" or parsed.netloc.lower() != domain.lower()):
+            raise ValueError(error)
+    return match.group(1)
+
+
 def write_zotero(citekey, url, tags, timings, title=None, alt_titles=()):
     """Extra gains ``Citation Key`` + ``Feishu: <url>``; data family keeps ``d:``."""
     import paper_identity as identity
@@ -351,24 +395,43 @@ def main():
                           "missing": gaps}, ensure_ascii=False, indent=2))
         return
 
+    editor_ids = fapi.validate_editor_open_ids(fcfg.get("editor_open_ids"))
     fc = fapi.client_from_config(fcfg)
     started = time.time()
     try:
         rows = find_papers(fc, ws, props["citekey"])
         timings["citekey_query"] = round((time.time() - started) * 1000)
         if len(rows) > 1:
-            ids = [r.get("record_id") for r in rows]
-            sys.exit(f"库里有多行同 citekey {props['citekey']}：{ids}；先合并再发布")
+            sys.exit(f"库里有 {len(rows)} 行同 citekey；先合并再发布")
 
         fields = record_fields(props, tags, None)
-        if rows:
-            fields = preserve_publication_time(fields, rows[0].get("fields") or {})
-
         doc_id = entry.get("doc_id")
+        make_public = not rows and (not doc_id or entry.get("state") == "pending")
+        if rows:
+            existing_fields = rows[0].get("fields") or {}
+            if not isinstance(existing_fields, dict):
+                raise ValueError("Existing row has malformed fields")
+            fields = preserve_publication_time(fields, existing_fields)
+            row_doc_id = existing_note_doc_id(existing_fields, fcfg)
+            if doc_id is not None and (not isinstance(doc_id, str)
+                                       or (doc_id and doc_id != row_doc_id)):
+                raise ValueError("Existing row note conflicts with the local index")
+            if not rows[0].get("record_id"):
+                raise ValueError("Existing row is missing its record identifier")
+            doc_id = row_doc_id
+
         if not doc_id:
             started = time.time()
             doc_id = fc.create_doc(props["title"] or props["citekey"], ws["folder_token"])
             timings["doc_create"] = round((time.time() - started) * 1000)
+            index[props["citekey"]] = {"doc_id": doc_id, "state": "pending"}
+            try:
+                save_json(index_path, index)
+            except Exception:
+                raise RuntimeError("could not record the new document for recovery; "
+                                   "manual recovery may be required") from None
+
+        fc.ensure_doc_full_access(doc_id, editor_ids)
 
         started = time.time()
         orphans = fdoc.orphan_figure_files(note_path)
@@ -385,10 +448,14 @@ def main():
         fdoc.replace_body(fc, doc_id, props["md"], figures)
         timings["body_write"] = round((time.time() - started) * 1000)
 
-        url = fc.doc_url(doc_id)
-        fc.grant_public_access(doc_id)
+        existing_link = existing_fields["笔记"]["link"] if rows else None
+        url = (existing_link if existing_link and not existing_link.startswith("/")
+               else fc.doc_url(doc_id))
+        if make_public:
+            fc.grant_public_access(doc_id)
 
-        fields["笔记"] = {"link": url, "text": "笔记"}
+        if not rows:
+            fields["笔记"] = {"link": url, "text": "笔记"}
         record_id = rows[0].get("record_id") if rows else None
         started = time.time()
         if record_id:
@@ -418,7 +485,10 @@ def main():
             "doc_id": doc_id, "url": url, "record_id": record_id,
             "rev": props["rev"], "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
-        save_json(index_path, index)
+        try:
+            save_json(index_path, index)
+        except Exception:
+            raise RuntimeError("could not record completed publication; verify before retrying") from None
         zotero = optional_zotero(props, url, tags, timings) if args.zotero else "not requested"
         print(json.dumps({
             "citekey": props["citekey"], "action": action, "doc": doc_id, "url": url,
@@ -434,4 +504,5 @@ if __name__ == "__main__":
     try:
         main()
     except fapi.FeishuError as e:
-        sys.exit(f"feishu error {e.code}: {e.msg}")
+        code = e.code if isinstance(e.code, int) else -1
+        sys.exit(f"feishu error {code}: request failed")

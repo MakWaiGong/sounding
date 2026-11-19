@@ -61,6 +61,7 @@
     "base_app_token": "",
     "papers_table_id": "",
     "folder_token": "",
+    "editor_open_ids": [],
     "destination_url": "",
     "base_token": "",
     "table_id": "",

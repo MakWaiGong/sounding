@@ -19,10 +19,12 @@ record). Nothing here knows about sounding notes.
 """
 from __future__ import annotations
 
+from collections import Counter
 import http.client
 import json
 import mimetypes
 import os
+import re
 import time
 import uuid
 import urllib.parse
@@ -32,6 +34,16 @@ DEFAULT_BASE = "https://open.feishu.cn"
 # Feishu's own throttling code; retrying is the documented remedy.
 _RETRY_CODES = {99991400}
 _RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def validate_editor_open_ids(ids):
+    """Require explicit, distinct Feishu open IDs before any document write."""
+    if (not isinstance(ids, list) or not ids
+            or any(not isinstance(value, str) or not re.fullmatch(r"ou_[0-9a-f]{32}", value)
+                   for value in ids)
+            or len(set(ids)) != len(ids)):
+        raise ValueError("feishu.editor_open_ids must be a non-empty list of unique, valid open IDs")
+    return list(ids)
 
 
 class FeishuError(RuntimeError):
@@ -84,7 +96,7 @@ class FeishuClient:
                 self._conn = http.client.HTTPConnection(self.host, timeout=self.timeout)
         return self._conn
 
-    def _send(self, method, path, body=None, headers=None, timed=None):
+    def _send(self, method, path, body=None, headers=None, timed=None, retry_on_disconnect=True):
         conn = self._connection()
         hdrs = {"Accept": "application/json"}
         if headers:
@@ -95,6 +107,8 @@ class FeishuClient:
             resp = conn.getresponse()
             raw = resp.read()
         except (http.client.HTTPException, OSError):
+            if not retry_on_disconnect:
+                raise
             # Stale keep-alive socket: reconnect once, then give up.
             conn = self._connection(fresh=True)
             conn.request(method, path, body=body, headers=hdrs)
@@ -111,7 +125,8 @@ class FeishuClient:
             raise FeishuError(path, resp.status, payload.get("msg") or raw[:200].decode("utf-8", "replace"))
         return payload, resp.status
 
-    def call(self, method, path, payload=None, params=None, timed=None, auth=True, _attempt=0):
+    def call(self, method, path, payload=None, params=None, timed=None, auth=True, _attempt=0,
+             retry=True):
         """One API call. Raises FeishuError unless ``code == 0``."""
         url = path
         if params:
@@ -122,12 +137,15 @@ class FeishuClient:
             headers["Content-Type"] = "application/json; charset=utf-8"
         if auth:
             headers["Authorization"] = "Bearer " + self.token()
-        resp, status = self._send(method, url, body, headers, timed)
+        if retry:
+            resp, status = self._send(method, url, body, headers, timed)
+        else:
+            resp, status = self._send(method, url, body, headers, timed, retry_on_disconnect=False)
 
         code = resp.get("code", 0 if status < 400 else status)
         if code not in (0, None):
             retryable = code in _RETRY_CODES or status in _RETRY_STATUS
-            if retryable and _attempt < self.retries:
+            if retry and retryable and _attempt < self.retries:
                 time.sleep(0.4 * (2 ** _attempt))
                 return self.call(method, path, payload, params, timed, auth, _attempt + 1)
             raise FeishuError(url, code, resp.get("msg") or resp.get("message") or "", resp)
@@ -224,6 +242,74 @@ class FeishuClient:
         """Let anyone with the link open the file, even outside the org."""
         return self.patch(f"/open-apis/drive/v2/permissions/{token}/public",
                           {"link_share_entity": level}, params={"type": doc_type})
+
+    def list_doc_permission_members(self, token):
+        """List collaborators; reject any indication that the result is incomplete."""
+        path = f"/open-apis/drive/v1/permissions/{urllib.parse.quote(token, safe='')}/members"
+        try:
+            data = self.get(path, params={"type": "docx"})
+            if (not isinstance(data, dict) or not isinstance(data.get("items"), list)
+                    or ("has_more" in data and data["has_more"] is not False)
+                    or data.get("page_token") or data.get("next_page_token")):
+                raise ValueError("incomplete collaborator list")
+            for item in data["items"]:
+                if (not isinstance(item, dict) or any(
+                        not isinstance(item.get(key), str) or not item[key]
+                        for key in ("member_type", "member_id", "perm"))):
+                    raise ValueError("invalid collaborator")
+            return data["items"]
+        except Exception:
+            raise FeishuError("document permissions", -1, "could not read collaborator permissions") from None
+
+    def ensure_doc_full_access(self, token, editor_open_ids):
+        """Grant only configured users full_access and verify via a fresh listing."""
+        try:
+            editor_open_ids = validate_editor_open_ids(editor_open_ids)
+            targets = set(editor_open_ids)
+
+            def states(members):
+                found = {}
+                for member in members:
+                    member_id = member["member_id"]
+                    if member["member_type"] == "openid" and member_id in targets:
+                        if member_id in found:
+                            raise ValueError("ambiguous collaborator")
+                        found[member_id] = member["perm"]
+                return found
+
+            def others(members):
+                return Counter((member["member_type"], member["member_id"], member["perm"],
+                                "perm_type" in member,
+                                json.dumps(member.get("perm_type"), sort_keys=True))
+                               for member in members
+                               if not (member["member_type"] == "openid"
+                                       and member["member_id"] in targets))
+
+            members_before = self.list_doc_permission_members(token)
+            before = states(members_before)
+            if any(perm not in ("view", "edit", "full_access") for perm in before.values()):
+                raise ValueError("unknown or higher collaborator permission")
+            path = f"/open-apis/drive/v1/permissions/{urllib.parse.quote(token, safe='')}/members"
+            for member_id in editor_open_ids:
+                perm = before.get(member_id)
+                if perm == "full_access":
+                    continue
+                if perm in ("view", "edit"):
+                    self.put(f"{path}/{urllib.parse.quote(member_id, safe='')}",
+                             {"member_type": "openid", "perm": "full_access"},
+                             params={"type": "docx", "need_notification": "false"}, retry=False)
+                else:
+                    self.post(path, {"member_type": "openid", "member_id": member_id,
+                                     "perm": "full_access"},
+                              params={"type": "docx", "need_notification": "false"}, retry=False)
+            members_after = self.list_doc_permission_members(token)
+            after = states(members_after)
+            if (any(after.get(member_id) != "full_access" for member_id in editor_open_ids)
+                    or others(members_before) != others(members_after)):
+                raise ValueError("collaborator verification failed")
+        except Exception:
+            raise FeishuError("document permissions", -1,
+                              "could not grant or verify full_access; permissions may have changed") from None
 
     # -- docx -------------------------------------------------------------
 

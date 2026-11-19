@@ -27,6 +27,8 @@ Every symbol that appears in the equations: its meaning, its type (scalar / vect
 
 - Include symbols used only once.
 - Do not list symbols the paper defines but never uses.
+- Make the table use the available text-column width where the backend supports explicit column sizing; prefer fewer unnecessary line wraps. If a long table remains hard to scan, group or split it without omitting symbols or changing their first-appearance order.
+- A fixed-width backend may need horizontal scrolling in narrow windows; do not claim responsive full-width behavior without verifying it.
 
 | 符号 | 含义 | 类型/形状 |
 | --- | --- | --- |

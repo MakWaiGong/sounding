@@ -12,7 +12,8 @@
 2. 复用用户自己的 `app_id` / `app_secret`，也支持 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`。Secret 与访问令牌只用于本机鉴权和官方 API 请求，不写公开文件，不输出到聊天或日志；检查结果只报告路径、字段存在性及脱敏错误。
 3. **应用 API 与浏览器登录态不同。** 通过现有 API 客户端获取应用令牌并只读检查目标库/表，确认资源 ID、真实字段与权限；浏览器的访客页、扫码页或用户会话 401 不能代替应用权限检查。只有应用 API 实际返回缺凭据、scope 或资源权限错误，才按对应原因处理，不能先要求用户扫码。
 4. 已有目标库先复用配置与本地 workspace/index，并核对正文关联方式。下面的 `feishu_setup.py --apply` 用于明确授权的初始化；不能因没找到当前 clone 的 workspace 就擅自新建另一套库。只读检查通过不代表写入/图片已通过，仍须按发布流程回读同一记录与正文。
-5. 论文领域的 domain 内容和关系仅由用户手写；读法也仅由用户填写且默认留空，“精读”表示用户在笔记生成后已亲自阅读。自动创建/更新负载省略这两个字段并保留已有值；不要与飞书租户域名配置混淆。
+5. 在本机私有配置 `feishu.editor_open_ids` 中填写经用户明确确认的、属于当前飞书应用的本人账号 open_id 列表。应用 ID 不等于用户 open_id；不能猜测账号归属或把账号 ID 输出、截图或提交。列表缺失、为空、重复或格式无效时，真实发布必须在创建或改写文档之前停止；dry-run 仍可只读预览。
+6. 论文领域的 domain 内容和关系仅由用户手写；读法也仅由用户填写且默认留空，“精读”表示用户在笔记生成后已亲自阅读。自动创建/更新负载省略这两个字段并保留已有值；不要与飞书租户域名配置混淆。
 
 ## 1 一条命令
 
@@ -32,13 +33,13 @@ python scripts/publish.py notes/<citekey>.md \
 
 ## 2 脚本做了什么
 
-1. 解析笔记头（兼容 `发表`，也支持 `期刊`；`发表时间：YYYY-MM` 为可选头）及 `## 定位素材` 的 DOI。飞书列名是 `期刊` / `发表时间`；只有年份时写年份文本，已存在的完整年月不会被年份值降级。年份冲突在创建或重写正文之前报错。速览按正文骨架浓缩，不固定第十行为 `去留`；如正文已有去留收口，可在对应压缩句保留，但不进表。
-2. 按 citekey **精确**查 `Papers`：1 行更新、0 行新建、多行停下报 record_id（`reference-library.md` §4）。
-3. 有记录就复用 `notes/.feishu-index.json` 里的 doc_id，先清空正文再整篇重写——笔记是重建的，不是打补丁。
-4. 图从 `notes/figs/<citekey>/manifest.json` 取，插到**解释它的那段叙述之后**：先剔除不叙述的行（`PDF 与来源`、速览、符号表、指标、与已读的关系、待查、定位素材、实验清单、参考文献、表格行、代码块），再取该图第一个可用提及所在段落/列表项的末尾插入；同一段提到多张图时按提及顺序分散，后一张顺延到下一次叙述提及，正文完全没提的图落文末（`Extended Data` / `Supplementary` 的提及跳过）。
-5. 回读：`raw_content` 文本长度、块数、图片块数、表格数四项都要对上，否则非零退出。
-6. 通过后写索引（doc_id / url / record_id / rev）与表格里的 `笔记` 链接字段。
-7. 把文档设成公开只读：`PATCH /open-apis/drive/v2/permissions/{doc}/public?type=docx`，`{"link_share_entity": "anyone_readable"}`（`FeishuClient.grant_public_access`）。**应用是文档所有者，用户在多维表格「分享」里改不了链接范围**（会提示「你无权编辑部分设置」），只能由应用用 API 设；base 也同理（`type=bitable`）。默认 `anyone_readable`（任何人拿链接可看），不要用 `tenant_*`（组织内限定）。
+1. 解析笔记头（兼容 `发表`，也支持 `期刊`；`发表时间：YYYY-MM` 为可选头）及 `## 定位素材` 的 DOI。飞书列名是 `期刊` / `发表时间`；只有年份时写年份文本，已存在的完整年月不会被年份值降级。年份冲突在创建或重写正文之前报错。速览按正文骨架浓缩，不固定第十行为 `去留`。
+2. 真实发布前验证私有配置中的本人账号；再按 citekey **精确**查 `Papers`：1 行更新、0 行新建、多行停下（`reference-library.md` §4）。
+3. 复用 `notes/.feishu-index.json` 里的 doc_id；新建文档后先将 doc_id 记录为待完成，以便后续重试复用。记录失败须停止并提示人工恢复。
+4. **先授予本人管理权限并回读。** 对每个指定账号单独授予 `full_access`（可管理，不是转让所有权），回读确认后才改写正文。不得回显或提交账号 ID，不改其他协作者；授权失败不算归档完成。 发布期间不要同时通过其他方式修改同一文档的协作者；飞书接口没有原子条件写入，前后回读不能排除所有并发冲突。
+5. 从 `notes/figs/<citekey>/manifest.json` 取图，插到**解释它的叙述之后**，不把表格、速览、参考文献或定位素材当图像锚点。已有正文会被整篇重写，手工修改应先保存。
+6. 新建文档默认使用 `{"link_share_entity": "anyone_readable"}`，持链接者只读；复用已有文档时保留其原有公开范围，不擅自将私有文档公开。不要为了让本人编辑而给所有持链接者编辑权限。然后创建或更新表格记录。
+7. 回读 `raw_content` 文本、块、图片和表格数量；全部通过后将 doc_id / url / record_id / rev 写入完成索引，否则不得报告成功。
 
 `rev` 是笔记 md 的 sha1 前 12 位；同一份笔记重跑是幂等的，改过内容重跑会覆盖同一篇文档。
 
@@ -68,7 +69,7 @@ python scripts/feishu_setup.py --probe --apply   # 记录 CRUD + 文档写入 + 
 - **图注**：`manifest.json` 每张图可加一条 `图注：Fig. N —— <解释>` 写在 `## 定位素材` 下，渲染成图片正下方的灰色斜体 text 块（`text_color: 7`），块内容形如 `Fig. N　<解释>（原 PDF 第 N 页）`；没有图注就只写 `Fig. N（原 PDF 第 N 页）`。图注行不会重复进正文。
 - **标题着色**：convert 出的 heading 块做后处理，给每个 text_run 设 `text_element_style.text_color`——H1/H2=蓝 5、H3=紫 6、H4=灰 7。
 - **图内联**：按每个 fig 的 `Fig. N` / `Figure N` **叙述提及**插位——非叙述行（`PDF 与来源`/速览/符号表/指标/与已读的关系/待查/定位素材/实验清单/参考文献/表格行/代码块）里的提及一律不作锚点，图插在提及所在段落或列表项的末尾；同一段提到多张图时按提及顺序分散到各自叙述处，不堆叠；`Extended Data Fig.` / `Supplementary` 跳过，正文没提过的图落文末。
-- **表格不能从 convert 结果直接插**（`1770029 block not support to create`）。表格一律自己建空表（`block_type 31`，`row_size` / `column_size` / `header_row`），再用 `blocks/batch_update` 一次性把 `R*C` 个 cell 里自带的空 text 块改掉。**单次建表 `row_size` 上限 9**（≥10 报 `1770001`）；更大的表先建 9 行，再用一次 `batch_update` 的 `insert_table_row` 补齐。
+- **表格不能从 convert 结果直接插**（`1770029 block not support to create`）。表格一律自己建空表（`block_type 31`，`row_size` / `column_size` / `header_row`），设置 `column_width` 以尽量铺满桌面正文，再用 `blocks/batch_update` 一次性把 `R*C` 个 cell 里自带的空 text 块改掉。**单次建表 `row_size` 上限 9**（≥10 报 `1770001`）；更大的表先建 9 行，再用 `insert_table_row` 补齐。飞书列宽是固定像素，不是百分比，窄窗口可能需要横向滚动；不得将其描述为自动响应式全宽。
 - 图片三步，缺一步就是空白块：建空图片块（`block_type 27`）→ `medias/upload_all`（`parent_type=docx_image`、`parent_node` = **图片块 id**、`extra.drive_route_token` = 文档 id）→ `PATCH` 块 `{"replace_image": {"token": <file_token>}}`。
 - 清正文用 `children/batch_delete`（`start_index 0`，`end_index` 给超过实际块数的值也接受）。
 - 图片块、表格块的 token 只有回读才能证明写进去了；`code: 0` 不代表成功。

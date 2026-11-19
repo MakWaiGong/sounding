@@ -209,7 +209,8 @@ class PublishNoteTests(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(redirect_stderr(StringIO()))
             stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.path), "--data", "PDB"]))
-            stack.enter_context(patch.object(publish.config, "feishu", return_value={}))
+            stack.enter_context(patch.object(
+                publish.config, "feishu", return_value={"editor_open_ids": ["ou_" + "a" * 32]}))
             stack.enter_context(patch.object(publish, "load_json", side_effect=[workspace, {}]))
             stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=client))
             stack.enter_context(patch.object(publish, "find_papers", return_value=rows))
@@ -220,6 +221,375 @@ class PublishNoteTests(unittest.TestCase):
         body.assert_not_called()
         client.update_record.assert_not_called()
         client.create_record.assert_not_called()
+
+
+class PublishPermissionFlowTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.note = Path(self.temporary.name) / "notes" / "paper.md"
+        self.note.parent.mkdir()
+        self.note.write_text(NOTE, encoding="utf-8")
+        self.workspace = {"app_token": "app", "folder_token": "folder", "tables": {"papers": "table"}}
+        self.client = MagicMock()
+        self.client.create_doc.return_value = "doc"
+        self.client.doc_url.return_value = "https://example.invalid/docx/doc"
+        self.client.create_record.return_value = {"record_id": "record"}
+        self.client.doc_text.return_value = "x" * 600
+        self.client.doc_children.return_value = [{} for _ in range(11)]
+        self.editors = ["ou_" + "a" * 32, "ou_" + "b" * 32]
+
+    def run_publish(self, editors, *, dry_run=False, index=None, rows=None, error=None, invalid=False,
+                    cfg_overrides=None, expect_public=False):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import call, patch
+        cfg = {"domain": "tenant.feishu.cn"}
+        if editors is not None:
+            cfg["editor_open_ids"] = editors
+        cfg.update(cfg_overrides or {})
+        argv = ["publish.py", str(self.note), "--data", "PDB"]
+        if dry_run:
+            argv.append("--dry-run")
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", argv))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value=cfg))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[self.workspace, index or {}]))
+            factory = stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=self.client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=rows or []))
+            stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=[]))
+            body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            save = stack.enter_context(patch.object(publish, "save_json"))
+            events = []
+            body.side_effect = lambda *args: events.append("body")
+            self.client.ensure_doc_full_access.side_effect = (
+                error if error else lambda *args: events.append("permissions"))
+            if invalid:
+                with self.assertRaisesRegex(ValueError, "editor_open_ids") as ctx:
+                    publish.main()
+                self.assertNotIn("ou_", str(ctx.exception))
+                factory.assert_not_called()
+                body.assert_not_called()
+                save.assert_not_called()
+                return
+            if error:
+                with self.assertRaises(publish.fapi.FeishuError):
+                    publish.main()
+            else:
+                publish.main()
+            if dry_run:
+                factory.assert_not_called()
+                body.assert_not_called()
+                save.assert_not_called()
+            elif error:
+                body.assert_not_called()
+                self.client.grant_public_access.assert_not_called()
+                self.client.create_record.assert_not_called()
+                self.client.update_record.assert_not_called()
+                if index or rows:
+                    save.assert_not_called()
+                else:
+                    save.assert_called_once()
+                    self.assertEqual(save.call_args.args[1]["20861cd95b"],
+                                     {"doc_id": "doc", "state": "pending"})
+            else:
+                self.client.ensure_doc_full_access.assert_called_once_with("doc", self.editors)
+                self.assertEqual(events, ["permissions", "body"])
+                if expect_public:
+                    self.client.grant_public_access.assert_called_once_with("doc")
+                    self.assertLess(self.client.mock_calls.index(call.ensure_doc_full_access("doc", self.editors)),
+                                    self.client.mock_calls.index(call.grant_public_access("doc")))
+                else:
+                    self.client.grant_public_access.assert_not_called()
+                self.assertEqual(save.call_count, 1 if index or rows else 2)
+            return save
+
+    def test_invalid_editor_config_preflight_before_any_remote_write(self):
+        invalid = [None, [], "bad", {}, [""], ["ou_short"], ["ou_" + "z" * 32],
+                   ["ou_" + "a" * 32 + " "], [17], [[]], ["ou_" + "a" * 32] * 2]
+        for ids in invalid:
+            with self.subTest(kind=type(ids).__name__):
+                self.client.reset_mock()
+                self.run_publish(ids, invalid=True)
+                self.client.create_doc.assert_not_called()
+                self.client.update_record.assert_not_called()
+                self.client.create_record.assert_not_called()
+
+    def test_dry_run_does_not_construct_remote_client_even_without_editors(self):
+        self.run_publish(None, dry_run=True)
+
+    def test_create_grants_and_verifies_before_public_link_and_row(self):
+        self.run_publish(self.editors, expect_public=True)
+        self.client.create_doc.assert_called_once()
+        self.client.create_record.assert_called_once()
+        self.client.grant_public_access.assert_called_once_with("doc")
+
+    def test_update_preserves_sharing_and_user_maintained_fields(self):
+        rows = [{"record_id": "record", "fields": {"发表时间": "2026-07", "领域": ["manual"],
+                                               "笔记": {"link": "https://tenant.feishu.cn/docx/doc",
+                                                        "text": "笔记"}}}]
+        index = {"20861cd95b": {"doc_id": "doc"}}
+        self.run_publish(self.editors, index=index, rows=rows)
+        self.client.create_doc.assert_not_called()
+        fields = self.client.update_record.call_args.args[3]
+        self.assertNotIn("发表时间", fields)
+        self.assertNotIn("领域", fields)
+        self.assertNotIn("读法", fields)
+        self.assertNotIn("笔记", fields)
+
+    def test_existing_link_is_reused_without_local_index(self):
+        rows = [{"record_id": "record", "fields": {
+            "笔记": {"link": "https://tenant.feishu.cn/docx/doc?from=copy", "text": "笔记"}}}]
+        save = self.run_publish(self.editors, rows=rows)
+        self.client.create_doc.assert_not_called()
+        self.client.create_record.assert_not_called()
+        self.client.grant_public_access.assert_not_called()
+        self.client.doc_url.assert_not_called()
+        self.client.update_record.assert_called_once()
+        self.assertNotIn("笔记", self.client.update_record.call_args.args[3])
+        self.assertEqual(save.call_args.args[1]["20861cd95b"]["url"], rows[0]["fields"]["笔记"]["link"])
+
+    def test_completed_index_without_row_does_not_make_document_public(self):
+        self.run_publish(self.editors, index={"20861cd95b": {"doc_id": "doc"}})
+        self.client.create_doc.assert_not_called()
+        self.client.create_record.assert_called_once()
+        self.client.grant_public_access.assert_not_called()
+
+    def test_pending_document_without_row_keeps_default_public_sharing(self):
+        pending = {"20861cd95b": {"doc_id": "doc", "state": "pending"}}
+        self.run_publish(self.editors, index=pending, expect_public=True)
+        self.client.create_doc.assert_not_called()
+        self.client.create_record.assert_called_once()
+        self.client.grant_public_access.assert_called_once_with("doc")
+
+    def test_pending_index_with_existing_row_does_not_make_document_public(self):
+        pending = {"20861cd95b": {"doc_id": "doc", "state": "pending"}}
+        rows = [{"record_id": "record", "fields": {"笔记": {"link": "/docx/doc"}}}]
+        self.run_publish(self.editors, index=pending, rows=rows)
+        self.client.create_doc.assert_not_called()
+        self.client.grant_public_access.assert_not_called()
+        self.assertNotIn("笔记", self.client.update_record.call_args.args[3])
+
+    def test_relative_legacy_link_is_reused_without_index(self):
+        rows = [{"record_id": "record", "fields": {"笔记": {"link": "/docx/doc"}}}]
+        self.run_publish(self.editors, rows=rows)
+        self.client.create_doc.assert_not_called()
+        self.client.update_record.assert_called_once()
+        self.assertNotIn("笔记", self.client.update_record.call_args.args[3])
+
+    def assert_row_rejected_without_mutation(self, fields, index=None, record_id="PRIVATE_ROW"):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        output, errors = StringIO(), StringIO()
+        rows = [{"record_id": record_id, "fields": fields}]
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(errors))
+            stack.enter_context(redirect_stdout(output))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB"]))
+            stack.enter_context(patch.object(
+                publish.config, "feishu", return_value={"editor_open_ids": self.editors,
+                                                        "domain": "tenant.feishu.cn"}))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[self.workspace, index or {}]))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=self.client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=rows))
+            body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            save = stack.enter_context(patch.object(publish, "save_json"))
+            with self.assertRaises(ValueError) as caught:
+                publish.main()
+        for sensitive in ("PRIVATE_DOC", "PRIVATE_INDEX", "PRIVATE_ROW", "evil.invalid"):
+            self.assertNotIn(sensitive, str(caught.exception))
+            self.assertNotIn(sensitive, output.getvalue())
+            self.assertNotIn(sensitive, errors.getvalue())
+        self.client.create_doc.assert_not_called()
+        self.client.ensure_doc_full_access.assert_not_called()
+        self.client.grant_public_access.assert_not_called()
+        self.client.create_record.assert_not_called()
+        self.client.update_record.assert_not_called()
+        body.assert_not_called()
+        save.assert_not_called()
+
+    def test_index_mismatch_stops_before_all_remote_mutations(self):
+        fields = {"笔记": {"link": "https://tenant.feishu.cn/docx/PRIVATE_DOC"}}
+        self.assert_row_rejected_without_mutation(fields, {"20861cd95b": {"doc_id": "PRIVATE_INDEX"}})
+
+    def test_malformed_index_ids_fail_before_remote_mutations(self):
+        fields = {"笔记": {"link": "/docx/PRIVATE_DOC"}}
+        for value in (False, 0, [], {}, 123):
+            with self.subTest(value_type=type(value).__name__):
+                self.client.reset_mock()
+                self.assert_row_rejected_without_mutation(fields, {"20861cd95b": {"doc_id": value}})
+
+    def test_existing_row_without_record_id_does_not_create_another_row(self):
+        fields = {"笔记": {"link": "/docx/PRIVATE_DOC"}}
+        self.assert_row_rejected_without_mutation(fields, record_id=None)
+
+    def test_missing_malformed_external_and_non_docx_links_fail_closed(self):
+        links = [None, {}, {"link": None}, {"link": []}, {"link": ""},
+                 {"link": "https://evil.invalid/docx/PRIVATE_DOC"},
+                 {"link": "https://tenant.feishu.cn.evil.invalid/docx/PRIVATE_DOC"},
+                 {"link": "https://tenant.feishu.cn@evil.invalid/docx/PRIVATE_DOC"},
+                 {"link": "https://tenant.feishu.cn:443/docx/PRIVATE_DOC"},
+                 {"link": "http://tenant.feishu.cn/docx/PRIVATE_DOC"},
+                 {"link": "//tenant.feishu.cn/docx/PRIVATE_DOC"},
+                 {"link": "https://tenant.feishu.cn/wiki/PRIVATE_DOC"},
+                 {"link": "/docx/PRIVATE_DOC/extra"},
+                 {"link": "/docx/PRIVATE_DOC%2Fother"},
+                 {"link": "///docx/PRIVATE_DOC"},
+                 {"link": "/docx/PRIVATE_DOC\n"},
+                 {"link": " /docx/PRIVATE_DOC"},
+                 {"link": "https://[bad/docx/PRIVATE_DOC"}]
+        for note in links:
+            for index in ({}, {"20861cd95b": {"doc_id": "PRIVATE_INDEX"}}):
+                with self.subTest(note_type=type(note).__name__, position=links.index(note),
+                                  indexed=bool(index)):
+                    self.client.reset_mock()
+                    self.assert_row_rejected_without_mutation({"笔记": note}, index)
+        self.client.reset_mock()
+        self.assert_row_rejected_without_mutation({})
+        self.client.reset_mock()
+        self.assert_row_rejected_without_mutation(["malformed"])
+
+    def test_destination_host_can_establish_trust_when_domain_is_unset(self):
+        cfg = {"destination_url": "https://tenant.feishu.cn/base/base?table=table&view=view",
+               "base_token": "base", "table_id": "table", "view_id": "view"}
+        fields = {"笔记": {"link": "https://tenant.feishu.cn/docx/doc?from=copy"}}
+        self.assertEqual(publish.existing_note_doc_id(fields, cfg), "doc")
+        save = self.run_publish(self.editors, rows=[{"record_id": "record", "fields": fields}],
+                                cfg_overrides={"domain": "", **cfg})
+        self.client.create_doc.assert_not_called()
+        self.client.doc_url.assert_not_called()
+        self.assertEqual(save.call_args.args[1]["20861cd95b"]["url"], fields["笔记"]["link"])
+        cfg["table_id"] = "other"
+        with self.assertRaises(ValueError):
+            publish.existing_note_doc_id(fields, cfg)
+
+    def test_absolute_link_requires_the_exact_trusted_tenant(self):
+        fields = {"笔记": {"link": "https://tenant.feishu.cn/docx/doc"}}
+        for cfg in ({}, {"domain": "other.feishu.cn"}, {"domain": "tenant.feishu.cn.evil.invalid"},
+                    {"domain": "https://tenant.feishu.cn"}, {"domain": ".feishu.cn"}):
+            with self.subTest(config_case=type(cfg.get("domain")).__name__):
+                with self.assertRaises(ValueError):
+                    publish.existing_note_doc_id(fields, cfg)
+        evil = {"笔记": {"link": "https://evil.invalid/docx/doc"}}
+        with self.assertRaises(ValueError):
+            publish.existing_note_doc_id(evil, {"domain": "evil.invalid"})
+        confusable = "tenant.feiſhu.cn"
+        with self.assertRaises(ValueError):
+            publish.existing_note_doc_id({"笔记": {"link": f"https://{confusable}/docx/doc"}},
+                                         {"domain": confusable})
+
+    def test_permission_failure_records_only_pending_and_cannot_report_success(self):
+        failure = publish.fapi.FeishuError("document permissions", -1, "verification failed")
+        self.run_publish(self.editors, error=failure)
+
+    def test_existing_document_permission_failure_does_not_touch_body(self):
+        failure = publish.fapi.FeishuError("document permissions", -1, "verification failed")
+        self.run_publish(self.editors, index={"20861cd95b": {"doc_id": "doc"}}, error=failure)
+        self.client.create_doc.assert_not_called()
+
+    def test_linked_row_permission_failure_does_not_touch_body_or_row(self):
+        failure = publish.fapi.FeishuError("document permissions", -1, "verification failed")
+        rows = [{"record_id": "record", "fields": {"笔记": {"link": "/docx/doc"}}}]
+        self.run_publish(self.editors, rows=rows, error=failure)
+        self.client.create_doc.assert_not_called()
+
+    def test_failed_authorization_reuses_pending_document_on_retry(self):
+        import json
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        workspace_path = self.note.parent / ".feishu-workspace.json"
+        workspace_path.write_text(json.dumps(self.workspace), encoding="utf-8")
+        index_path = self.note.parent / ".feishu-index.json"
+        failure = publish.fapi.FeishuError("document permissions", -1, "verification failed")
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={"editor_open_ids": self.editors}))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=self.client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=[]))
+            body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            self.client.ensure_doc_full_access.side_effect = failure
+            with self.assertRaises(publish.fapi.FeishuError):
+                publish.main()
+            body.assert_not_called()
+            self.client.grant_public_access.assert_not_called()
+            pending = json.loads(index_path.read_text(encoding="utf-8"))
+            self.assertEqual(pending["20861cd95b"], {"doc_id": "doc", "state": "pending"})
+            self.client.ensure_doc_full_access.side_effect = None
+            publish.main()
+            self.client.create_doc.assert_called_once()
+            self.client.grant_public_access.assert_called_once_with("doc")
+            body.assert_called_once()
+            completed = json.loads(index_path.read_text(encoding="utf-8"))["20861cd95b"]
+            self.assertEqual(completed["doc_id"], "doc")
+            self.assertEqual(completed["record_id"], "record")
+            self.assertNotIn("state", completed)
+            self.assertEqual(list(self.note.parent.glob(".feishu-index-*.tmp")), [])
+
+    def test_pending_index_failure_stops_before_permission_or_body(self):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={"editor_open_ids": self.editors}))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[self.workspace, {}]))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=self.client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=[]))
+            stack.enter_context(patch.object(publish, "save_json", side_effect=OSError("private data")))
+            body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            with self.assertRaisesRegex(RuntimeError, "manual recovery") as ctx:
+                publish.main()
+            self.assertNotIn("private data", str(ctx.exception))
+            self.assertTrue(ctx.exception.__suppress_context__)
+            self.client.ensure_doc_full_access.assert_not_called()
+            body.assert_not_called()
+            self.client.create_record.assert_not_called()
+
+    def test_completion_index_failure_never_reports_success(self):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        output = StringIO()
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(redirect_stdout(output))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={"editor_open_ids": self.editors}))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[self.workspace, {}]))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=self.client))
+            stack.enter_context(patch.object(publish, "find_papers", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=[]))
+            stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            stack.enter_context(patch.object(publish, "save_json", side_effect=[None, OSError("private data")]))
+            with self.assertRaisesRegex(RuntimeError, "verify before retrying") as ctx:
+                publish.main()
+            self.assertNotIn("private data", str(ctx.exception))
+            self.assertTrue(ctx.exception.__suppress_context__)
+            self.assertEqual(output.getvalue(), "")
+
+    def test_atomic_index_failure_preserves_previous_index(self):
+        from unittest.mock import patch
+        index_path = self.note.parent / ".feishu-index.json"
+        index_path.write_text('{"old": "data"}', encoding="utf-8")
+        with patch.object(publish.os, "replace", side_effect=OSError("failed")):
+            with self.assertRaises(OSError):
+                publish.save_json(str(index_path), {"new": "data"})
+        self.assertEqual(index_path.read_text(encoding="utf-8"), '{"old": "data"}')
+        self.assertEqual(list(self.note.parent.glob(".feishu-index-*.tmp")), [])
+
 
 
 if __name__ == "__main__":

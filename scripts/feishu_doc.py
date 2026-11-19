@@ -180,13 +180,21 @@ def append_table(client, doc_id, rows, width):
 
     Feishu refuses to create a table with more than 9 rows (``1770001``), so a
     bigger table is created at 9 rows and grown with ``insert_table_row``.
-    A cell has no text block until one is appended, so an empty cell stays quiet
-    rather than raising.
+    Columns share a 1020px desktop target, with a 50px minimum per column;
+    this is not responsive sizing.
+    An empty cell stays quiet rather than raising.
     """
+    if not isinstance(width, int) or isinstance(width, bool) or width < 1:
+        raise ValueError("table width must be a positive integer")
+    if not rows or any(len(row) > width for row in rows):
+        raise ValueError("table must have rows with no more cells than columns")
+    base, remainder = divmod(max(1020, 50 * width), width)
+    column_width = [base + (col < remainder) for col in range(width)]
     _MAX_ROW = 9
     create_row = min(len(rows), _MAX_ROW)
     payload = {"block_type": 31, "table": {"property": {
-        "row_size": create_row, "column_size": width, "header_row": True}}}
+        "row_size": create_row, "column_size": width, "header_row": True,
+        "column_width": column_width}}}
     created = client.append_children(doc_id, [payload])[0]
     table_id = created["block_id"]
     if len(rows) > create_row:
