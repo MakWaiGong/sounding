@@ -196,8 +196,6 @@ def record_fields(props, tags, url):
         values = tags.get(concept)
         if values:
             fields[field] = values
-    if tags.get("read"):
-        fields["读法"] = tags["read"]
     if url:
         fields["笔记"] = {"link": url, "text": "笔记"}
     for field, value in list(fields.items()):
@@ -262,7 +260,8 @@ def main():
     ap = argparse.ArgumentParser(description="Publish one note into the Feishu library.")
     ap.add_argument("note", help="path to notes/<citekey>.md")
     ap.add_argument("--data", help="数据类型, comma separated")
-    ap.add_argument("--read", choices=["扫", "精读"], default="精读")
+    ap.add_argument("--read", choices=["扫", "精读"], default=None,
+                    help="deprecated: ignored; reading status is managed by the user")
     ap.add_argument("--allow-partial", action="store_true",
                     help="write even when a required property is missing")
     ap.add_argument("--zotero", action="store_true", help="write the link and tags back")

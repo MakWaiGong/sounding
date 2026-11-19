@@ -118,5 +118,15 @@ class PublishNoteTests(unittest.TestCase):
         self.assertIn("迁移：2026-11-07 从 飞书 迁入；主后端 = 飞书", out)
 
 
+    def test_manual_reading_and_domain_are_never_sent(self):
+        props = publish.parse_note(str(self.path))
+        tags = {"data": ["PDB"], "read": "精读", "domain": ["manual-domain"]}
+        fields = publish.record_fields(props, tags, "https://x/docx/1")
+        self.assertNotIn("读法", fields)
+        self.assertNotIn("领域", fields)
+        self.assertNotIn("domain", fields)
+        self.assertEqual(fields["数据类型"], ["PDB"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
