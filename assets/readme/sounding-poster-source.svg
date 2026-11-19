@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1832" height="859" viewBox="0 0 1832 859" role="img" aria-labelledby="poster-title poster-desc">
-  <title id="poster-title">观潮 / Sounding</title>
+  <title id="poster-title">观潮 / SOUNDING</title>
   <desc id="poster-desc">翻涌的浪潮之下，亮起的测深点落在原始海床的山脊和坡面，共同勾勒地形。</desc>
   <defs>
     <linearGradient id="shade-x" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1150" y2="0">
@@ -54,7 +54,8 @@
     <g class="middle"><path d="M 1740 341 V 656" fill="none" stroke="#e0e7da" stroke-width="1.1" opacity="0.46"/><circle cx="1740" cy="656" r="12" fill="url(#seabed-glow)"/><circle cx="1740" cy="656" r="2.3" fill="#fff9e6"/></g>
   </g>
   <text x="112" y="360" fill="#f5f0e1" font-family="STZhongsong, STSong, Songti SC, SimSun, serif" font-size="158">观潮</text>
-  <text x="458" y="350" fill="#f5f0e1" font-family="Georgia, Times New Roman, serif" font-size="64" letter-spacing="4">SOUNDING</text>
-  <text x="112" y="490" fill="#f5f0e1" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="68" font-weight="700">读懂一篇，看清一片</text>
-  <text x="112" y="580" fill="#d1ded8" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="64">多次测深，勾勒学术海床</text>
+  <text x="442" y="350" fill="#d1ded8" font-family="Georgia, Times New Roman, serif" font-size="48">/</text>
+  <text x="478" y="350" fill="#f5f0e1" font-family="Georgia, Times New Roman, serif" font-size="60" letter-spacing="3">SOUNDING</text>
+  <text x="112" y="490" fill="#f5f0e1" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="68" font-weight="700">深潜一篇，看清一片</text>
+  <text x="112" y="580" fill="#d1ded8" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="60" letter-spacing="-4.5">多次测深，勾勒浪潮下的洋底</text>
 </svg>

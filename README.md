@@ -1,6 +1,6 @@
-# 观潮 / Sounding
+# 观潮 / SOUNDING
 
-![翻涌的学术浪潮下，多条测深线逐渐勾勒海床](assets/readme/sounding-poster.png)
+![观潮 / SOUNDING：深潜一篇，看清一片。多次测深，勾勒浪潮下的洋底；多条测线抵达海床。](assets/readme/sounding-poster.png)
 
 > **把论文读成可复述、可核对、可迁移的证据链。**
 >
