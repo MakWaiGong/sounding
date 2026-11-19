@@ -112,6 +112,8 @@ Sounding 根据**论文的主要贡献和论证结构**，将文献分为四类�
 
 ## 2. 效果展示
 
+### 单篇测深：三类论文案例
+
 三种论证结构，各看**文本阅读**与**飞书归档**两种交付。先选择一篇，再展开需要的模式；每份文本都保留原图、出处和证据边界。
 
 | 方法／算法 | 科学发现／机制 | 综述／Perspective |
@@ -400,21 +402,13 @@ Figure 3: Application in mouse blood hematopoiesis data (σ = 0.1), visualized i
 </details>
 
 <details>
-<summary><strong>🗂️ 云端归档模式｜真实飞书笔记与论文库</strong></summary>
+<summary><strong>🗂️ 云端归档模式｜真实飞书单篇笔记</strong></summary>
 
 <!-- CYTOBRIDGE_ARCHIVE_BEGIN -->
 
 **飞书笔记：** [打开 CytoBridge 单篇笔记](https://rcntgteigkrr.feishu.cn/docx/URpEd790XomUL2xLiA2cVmnJnoc)。
 
-**多维表格：**
-
-[![用户提供的飞书多维表格截图](examples/cytobridge/feishu-library.png)](examples/cytobridge/feishu-library.png)
-
-<sub>用户提供的论文库截图；点击查看原图。截图反映截取时的表格状态。</sub>
-
-<!-- PRIVATE_CLOUD_PREVIEW -->
-
-> 这篇单篇笔记为持链接可读；上图经用户确认用于展示，私人论文库入口不放入公开 README。
+> 这篇单篇笔记为持链接可读。
 
 <!-- CYTOBRIDGE_ARCHIVE_END -->
 
@@ -919,6 +913,16 @@ Figure 4. Evaluation of biomedical world models<br>
 </details>
 
 </details>
+
+### 多篇观潮：论文库
+
+单篇测深留下的阅读和定位信息可以汇聚到同一个多维表格：不同类型的论文在这里按标题、DOI、类型和笔记入口等信息统一组织，便于回顾、比较和继续梳理研究脉络。
+
+[![论文库多维表格局部：标题、期刊、发表时间、领域、类型与笔记](examples/cytobridge/feishu-library-detail.png)](examples/cytobridge/feishu-library.png)
+
+<!-- PRIVATE_CLOUD_PREVIEW -->
+
+<sub>用户提供的论文库示例快照，反映截图时的表格状态。上图为原图局部裁切、放大与适度锐化；点击查看未经修改的完整原图。私人论文库入口不放入公开 README。</sub>
 
 ## 3. 如何使用
 
