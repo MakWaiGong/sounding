@@ -2,6 +2,14 @@
 
 飞书是 `publish.py` 的第二条发布路径：一篇笔记 = 多维表格里一行 `Papers` + 一篇云文档正文。和 Notion 那条路径的区别在**谁解析 markdown**：Notion MCP 直接吃 notion-flavored markdown，飞书要自己转成 block，所以这件事必须由脚本做，不能由 agent 手搓 API。
 
+## 0 先用私有配置验证应用身份
+
+1. 用 `scripts/config.py` 解析实际配置路径：`SOUNDING_CONFIG` 优先，未设置才读取当前 skill 目录的 `config.local.json`。飞书字段经 `config.feishu()` 应用环境变量覆盖；不要只看公开示例，或在另一个 clone 里寻找密钥。
+2. 复用用户自己的 `app_id` / `app_secret`，也支持 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`。Secret 与访问令牌只用于本机鉴权和官方 API 请求，不写公开文件，不输出到聊天或日志；检查结果只报告路径、字段存在性及脱敏错误。
+3. **应用 API 与浏览器登录态不同。** 通过现有 API 客户端获取应用令牌并只读检查目标库/表，确认资源 ID、真实字段与权限；浏览器的访客页、扫码页或用户会话 401 不能代替应用权限检查。只有应用 API 实际返回缺凭据、scope 或资源权限错误，才按对应原因处理，不能先要求用户扫码。
+4. 已有目标库先复用配置与本地 workspace/index，并核对正文关联方式。下面的 `feishu_setup.py --apply` 用于明确授权的初始化；不能因没找到当前 clone 的 workspace 就擅自新建另一套库。只读检查通过不代表写入/图片已通过，仍须按发布流程回读同一记录与正文。
+5. 论文领域的 domain 内容和关系仅由用户手写，自动创建/更新负载省略该字段，保留已有值；不要与飞书租户域名配置混淆。
+
 ## 1 一条命令
 
 ```bash

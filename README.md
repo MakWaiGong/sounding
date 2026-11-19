@@ -121,7 +121,9 @@ setx SOUNDING_CONFIG "%USERPROFILE%\.sounding\config.local.json"
 export SOUNDING_CONFIG=~/.sounding/config.local.json
 ```
 
-`setup.py` 会写到这个位置，`--check` 也会从它读。
+`setup.py` 会写到这个位置，`--check` 也会从它读。Windows 的 `setx` 只影响之后启动的进程；当前终端需要另外设置 `SOUNDING_CONFIG`，或重启终端/客户端。
+
+**agent 必须先检查实际加载的文件，而不是先问用户要密钥。** 设置了 `SOUNDING_CONFIG` 就读取该路径，否则读取当前 skill 目录的 `config.local.json`；上面的 `~/.sounding/` 不会自动生效。配置加载后再应用 section accessor 支持的环境变量覆盖。只检查字段是否存在，不打印整份配置或令牌。用户级配置和凭据不进入 GitHub；升级代码时保留原配置、笔记、PDF 和发布索引。
 
 然后改 `config.local.json`：
 
@@ -131,13 +133,14 @@ export SOUNDING_CONFIG=~/.sounding/config.local.json
 | `zotero.data_dir` | Zotero 存放数据的主目录 |
 | `zotero.user_id` | API 用的 userID（不是用户名），keys 页面顶部可见 |
 | `zotero.api_key` | Web API key，只给回写脚本用 |
+| `feishu.app_id` / `feishu.app_secret` | 用户自己的飞书应用凭据，仅写私有配置；Secret 不回显、不提交 |
 | `notion.papers_database_id` | 每篇一行的 Papers 库 |
 | `notion.papers_data_source_id` | 同库的 data source，`collection://…` |
 | `notion.properties` | 概念名 → 你库里的真实字段名 |
 | `notion.option_values` | select 字段的合法值 |
 | `zotero_tag_prefix` | 数据类型标签在 Zotero 侧的前缀 |
 
-环境变量可覆盖文件：`ZOTERO_DB`、`ZOTERO_DATA_DIR`、`NOTION_PAPERS_DB`、`NOTION_PAPERS_DS`。本地配置按嵌套字段覆盖默认值，未填写的默认项保留；显式空值仍保留为空。
+环境变量可覆盖文件：`ZOTERO_DB`、`ZOTERO_DATA_DIR`、`NOTION_PAPERS_DB`、`NOTION_PAPERS_DS`，以及飞书的 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_API_BASE`、`FEISHU_DOMAIN`、`FEISHU_BASE_APP`。本地配置按嵌套字段覆盖默认值，未填写的默认项保留；显式空值仍保留为空。
 
 `config.local.json` 是你自己的副本，不进版本库。
 
