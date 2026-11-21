@@ -314,7 +314,7 @@ citekey：zhangSpatialAtlas2024
 
 **回读成功才算发布。** 本地稿、schema 离线校验、工具发现、`code: 0` 或写入请求已发出，都不能单独证明落库完成：Notion 按 page ID 回读，飞书按 `raw_content` + 图片块 + 表格数回读（见 `reference-feishu.md` §2）。
 
-发布成功并回写 Zotero 后，清理本次运行产生的临时文件（本地 md、扫描/提取文本、坐标缓存等中间产物），本地不残留；脚本尽量不落盘这些文件，能直接进内存或写云端就不写本地。
+发布成功并回写 Zotero 后，可清理本次运行产生的临时稿和裁图等中间产物；但飞书的共享发布索引、锁文件和恢复检查点不是临时产物，必须保留，不能为重试而删除。源 PDF 的保留规则见第 2 节。
 
 ## 9 停止条件
 
@@ -351,7 +351,7 @@ citekey：zhangSpatialAtlas2024
 
 后端在配置阶段二选一，笔记本身不区分后端：`feishu` 段填了应用凭证就走飞书，`notion` 段填了库 id 就走 Notion。同一篇笔记不要同时发到两个云端——两边各留一份会立刻产生两个 url，`Extra` 只能记一个，下次改稿就不知道以哪边为准。
 
-- **飞书**：`python scripts/publish.py notes/<citekey>.md --data …`。脚本负责 citekey 幂等、整篇替换、图片上传、回读校验、索引与 `笔记` 链接字段回写。库初始化、字段表、已知坑与延迟基线见 `reference-feishu.md`。
+- **飞书**：单篇用 `python scripts/publish.py notes/<citekey>.md --data …`；多篇已准备好的独立笔记用 `python scripts/publish_batch.py notes/<key1>.md notes/<key2>.md` 受控并发，逐篇核对结果。同篇并发报忙，不覆盖；图片并发上传并在中断后核验可恢复的检查点。共享状态不得删除，结果未知时停止并核查，不盲目重复写入。仅保护同机、使用同一状态目录的新版本，不能阻止其他机器或用户手工编辑。限额、恢复和批量命令见 `reference-feishu.md`。
 - **Notion**：仅显式选择该归档后端时才连接官方 Remote Notion MCP，不设全局工具硬依赖，不为文本或飞书路线连接。工具不可用时，先安装或连接 MCP、完成 OAuth，并按 `reference-notion.md` 做一次创建—回读—更新—清理探针；通过后用 `scripts/notion_workspace.py` 缓存工作区验收。缓存有效时逐篇发布不得重跑探针；工作区配置变化或实际权限、OAuth、schema 错误才使它失效。
 
 发布因权限、网络或用户尚未完成 OAuth 而暂时受阻时，可以把工作稿保存在 `notes/<citekey>.md` 防止丢失，但它只是恢复材料。任务状态必须写「发布受阻（未完成）」，不能把本地回退产物当成云端归档完成；已完成的全文解读仍可作为文本模式交付。

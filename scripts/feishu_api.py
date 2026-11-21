@@ -20,10 +20,12 @@ record). Nothing here knows about sounding notes.
 from __future__ import annotations
 
 from collections import Counter
+from email.utils import parsedate_to_datetime
 import http.client
 import json
 import mimetypes
 import os
+import random
 import re
 import time
 import uuid
@@ -31,9 +33,28 @@ import urllib.parse
 
 DEFAULT_BASE = "https://open.feishu.cn"
 
-# Feishu's own throttling code; retrying is the documented remedy.
-_RETRY_CODES = {99991400}
-_RETRY_STATUS = {429, 500, 502, 503, 504}
+# Retry-After beyond this limit fails closed instead of retrying too early.
+_RATE_LIMIT_CODE = 99991400
+_MAX_RETRIES = 5
+_MAX_RETRY_DELAY = 8.0
+_BASE_RETRY_DELAY = 0.4
+
+
+def _retry_after_seconds(value):
+    """Parse HTTP Retry-After, without retaining the header or accepting negatives."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.isascii() and value.isdecimal():
+        digits = value.lstrip("0") or "0"
+        return float(digits) if len(digits) < 9 else float("inf")
+    try:
+        date = parsedate_to_datetime(value)
+        if date.tzinfo is None:
+            return None
+        return max(0.0, date.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 def validate_editor_open_ids(ids):
@@ -62,8 +83,16 @@ class FeishuError(RuntimeError):
         return self.code in {99991672, 99991679, 1069902, 1069903}
 
 
+class FeishuRateLimitError(FeishuError):
+    """An explicit HTTP 429 or Feishu rate-limit response rejected the request."""
+
+
+class FeishuUncertainError(FeishuError):
+    """A write may have succeeded; reconcile its state before trying again."""
+
+
 class FeishuClient:
-    """Blocking client. One instance per publish run is the intended use."""
+    """Blocking client. Use separate instances for concurrent publish runs."""
 
     def __init__(self, app_id, app_secret, base=DEFAULT_BASE, timeout=30,
                  domain=None, retries=2):
@@ -75,8 +104,9 @@ class FeishuClient:
         self.scheme = urllib.parse.urlsplit(base).scheme or "https"
         self.timeout = timeout
         self.domain = domain
-        self.retries = retries
+        self.retries = max(0, min(int(retries), _MAX_RETRIES))
         self._conn = None
+        self._retry_after = None
         self._token = None
         self._token_expires = 0.0
         self.timings = {}
@@ -96,34 +126,112 @@ class FeishuClient:
                 self._conn = http.client.HTTPConnection(self.host, timeout=self.timeout)
         return self._conn
 
+    def _discard_connection(self):
+        conn, self._conn = self._conn, None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def _send(self, method, path, body=None, headers=None, timed=None, retry_on_disconnect=True):
-        conn = self._connection()
         hdrs = {"Accept": "application/json"}
         if headers:
             hdrs.update(headers)
+        self._retry_after = None
         t0 = time.perf_counter()
         try:
-            conn.request(method, path, body=body, headers=hdrs)
-            resp = conn.getresponse()
-            raw = resp.read()
-        except (http.client.HTTPException, OSError):
-            if not retry_on_disconnect:
-                raise
-            # Stale keep-alive socket: reconnect once, then give up.
-            conn = self._connection(fresh=True)
-            conn.request(method, path, body=body, headers=hdrs)
-            resp = conn.getresponse()
-            raw = resp.read()
+            conn = self._connection()
+            for attempt in range(2):
+                try:
+                    conn.request(method, path, body=body, headers=hdrs)
+                    resp = conn.getresponse()
+                    self._retry_after = _retry_after_seconds(resp.getheader("Retry-After"))
+                    raw = resp.read()
+                    break
+                except (http.client.HTTPException, OSError):
+                    self._discard_connection()
+                    if not retry_on_disconnect or method.upper() != "GET" or attempt:
+                        raise
+                    conn = self._connection(fresh=True)
         finally:
             if timed is not None:
                 self.timings[timed] = round((time.perf_counter() - t0) * 1000)
         try:
             payload = json.loads(raw.decode("utf-8") or "{}")
-        except json.JSONDecodeError:
-            raise FeishuError(path, resp.status, raw[:300].decode("utf-8", "replace"))
-        if resp.status >= 400 and "code" not in payload:
-            raise FeishuError(path, resp.status, payload.get("msg") or raw[:200].decode("utf-8", "replace"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            if resp.status >= 400:
+                payload = {}
+            else:
+                raise FeishuError("request", resp.status, "invalid JSON response") from None
+        if not isinstance(payload, dict):
+            if resp.status >= 400:
+                payload = {}
+            else:
+                raise FeishuError("request", resp.status, "invalid JSON response")
         return payload, resp.status
+
+    def _retry_wait(self, attempt, retry_after=None):
+        if retry_after is not None and retry_after > _MAX_RETRY_DELAY:
+            return False
+        ceiling = min(_MAX_RETRY_DELAY, _BASE_RETRY_DELAY * (2 ** attempt))
+        delay = random.uniform(0, ceiling)
+        if retry_after is not None:
+            delay = max(delay, retry_after)
+        time.sleep(delay)
+        return True
+
+    def _request(self, method, url, body, headers, timed=None, retry=True, attempt=0):
+        safe = method.upper() == "GET"
+        attempt = max(0, int(attempt))
+        while True:
+            self._retry_after = None
+            try:
+                resp, status = self._send(method, url, body, headers, timed,
+                                          retry_on_disconnect=False)
+            except (http.client.HTTPException, OSError) as exc:
+                if not safe:
+                    raise FeishuUncertainError("request", -1,
+                        "write outcome is uncertain after transport failure; reconcile before retrying") from None
+                if not retry or attempt >= self.retries:
+                    message = "GET transport failure; " + ("retry limit reached" if retry else "retries disabled")
+                    if isinstance(exc, OSError):
+                        raise OSError(message) from None
+                    raise http.client.HTTPException(message) from None
+                self._retry_wait(attempt)
+                attempt += 1
+                continue
+            except FeishuError as exc:
+                if not safe:
+                    raise FeishuUncertainError("request", exc.code,
+                        "write outcome is uncertain after invalid response; reconcile before retrying") from None
+                raise
+
+            code = resp.get("code", 0 if status < 400 else status)
+            if status >= 500:
+                if not safe:
+                    raise FeishuUncertainError("request", status,
+                        "write outcome is uncertain after server failure; reconcile before retrying")
+                if (retry and attempt < self.retries
+                        and self._retry_wait(attempt, self._retry_after)):
+                    attempt += 1
+                    continue
+                raise FeishuError("request", status, "server failure; retry budget or maximum wait exceeded"
+                                  if retry else "server failure")
+            if status == 429 or code == _RATE_LIMIT_CODE:
+                if (retry and attempt < self.retries
+                        and self._retry_wait(attempt, self._retry_after)):
+                    attempt += 1
+                    continue
+                raise FeishuRateLimitError(
+                    "request", _RATE_LIMIT_CODE if code == _RATE_LIMIT_CODE else 429,
+                    "rate limited; retry budget or maximum wait exceeded" if retry
+                    else "rate limited; retries disabled")
+            if status >= 400 or code not in (0, None):
+                if code in (0, None):
+                    code = status
+                raise FeishuError(url, code, resp.get("msg") or resp.get("message") or "", resp)
+            return resp
 
     def call(self, method, path, payload=None, params=None, timed=None, auth=True, _attempt=0,
              retry=True):
@@ -137,18 +245,7 @@ class FeishuClient:
             headers["Content-Type"] = "application/json; charset=utf-8"
         if auth:
             headers["Authorization"] = "Bearer " + self.token()
-        if retry:
-            resp, status = self._send(method, url, body, headers, timed)
-        else:
-            resp, status = self._send(method, url, body, headers, timed, retry_on_disconnect=False)
-
-        code = resp.get("code", 0 if status < 400 else status)
-        if code not in (0, None):
-            retryable = code in _RETRY_CODES or status in _RETRY_STATUS
-            if retry and retryable and _attempt < self.retries:
-                time.sleep(0.4 * (2 ** _attempt))
-                return self.call(method, path, payload, params, timed, auth, _attempt + 1)
-            raise FeishuError(url, code, resp.get("msg") or resp.get("message") or "", resp)
+        resp = self._request(method, url, body, headers, timed, retry, _attempt)
         return resp.get("data", resp) if "data" in resp else resp
 
     def get(self, path, params=None, **kw):
@@ -219,14 +316,16 @@ class FeishuClient:
             "Content-Type": f"multipart/form-data; boundary={boundary}",
         }
         t0 = time.perf_counter()
-        resp, status = self._send("POST", url, body, headers)
-        if timed is not None:
-            self.timings[timed] = round((time.perf_counter() - t0) * 1000)
-        if resp.get("code") not in (0, None):
-            raise FeishuError(url, resp.get("code"), resp.get("msg") or "", resp)
-        token = (resp.get("data") or {}).get("file_token")
+        try:
+            resp = self._request("POST", url, body, headers)
+        finally:
+            if timed is not None:
+                self.timings[timed] = round((time.perf_counter() - t0) * 1000)
+        data = resp.get("data")
+        token = data.get("file_token") if isinstance(data, dict) else None
         if not token:
-            raise FeishuError(url, -1, "no file_token in response", resp)
+            raise FeishuUncertainError("request", -1,
+                "upload outcome is uncertain: no file token returned; reconcile before retrying")
         return token
 
     def create_folder(self, name, parent=""):
@@ -317,7 +416,13 @@ class FeishuClient:
         payload = {"title": title}
         if folder:
             payload["folder_token"] = folder
-        return self.post("/open-apis/docx/v1/documents", payload)["document"]["document_id"]
+        data = self.post("/open-apis/docx/v1/documents", payload)
+        document = data.get("document") if isinstance(data, dict) else None
+        document_id = document.get("document_id") if isinstance(document, dict) else None
+        if not isinstance(document_id, str) or not document_id:
+            raise FeishuUncertainError("request", -1,
+                "document creation outcome is uncertain: no document id returned; reconcile before retrying")
+        return document_id
 
     def doc_children(self, doc_id, page_size=500):
         items, page_token = [], None
@@ -463,8 +568,14 @@ class FeishuClient:
         return items
 
     def create_record(self, app_token, table_id, fields):
-        return self.post(f"/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records",
-                         {"fields": fields})["record"]
+        data = self.post(f"/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records",
+                         {"fields": fields})
+        record = data.get("record") if isinstance(data, dict) else None
+        record_id = record.get("record_id") if isinstance(record, dict) else None
+        if not isinstance(record_id, str) or not record_id:
+            raise FeishuUncertainError("request", -1,
+                "record creation outcome is uncertain: no record id returned; reconcile before retrying")
+        return record
 
     def update_record(self, app_token, table_id, record_id, fields):
         return self.put(

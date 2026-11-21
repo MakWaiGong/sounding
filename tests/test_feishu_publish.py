@@ -31,6 +31,10 @@ class PublishNoteTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        from unittest.mock import patch
+        env = patch.dict("os.environ", {"SOUNDING_FEISHU_STATE_DIR": str(Path(self.temporary.name) / "state")})
+        env.start()
+        self.addCleanup(env.stop)
         self.path = Path(self.temporary.name) / "20861cd95b.md"
         self.path.write_text(NOTE, encoding="utf-8")
 
@@ -228,13 +232,18 @@ class PublishPermissionFlowTests(unittest.TestCase):
         from unittest.mock import MagicMock
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
+        from unittest.mock import patch
+        env = patch.dict("os.environ", {"SOUNDING_FEISHU_STATE_DIR": str(Path(self.temporary.name) / "state")})
+        env.start()
+        self.addCleanup(env.stop)
         self.note = Path(self.temporary.name) / "notes" / "paper.md"
         self.note.parent.mkdir()
         self.note.write_text(NOTE, encoding="utf-8")
         self.workspace = {"app_token": "app", "folder_token": "folder", "tables": {"papers": "table"}}
         self.client = MagicMock()
         self.client.create_doc.return_value = "doc"
-        self.client.doc_url.return_value = "https://example.invalid/docx/doc"
+        self.client.doc_url.return_value = "/docx/doc"
+        self.client.get.return_value = {"record": {"record_id": "record", "fields": {"笔记": {"link": "/docx/doc"}}}}
         self.client.create_record.return_value = {"record_id": "record"}
         self.client.doc_text.return_value = "x" * 600
         self.client.doc_children.return_value = [{} for _ in range(11)]
@@ -265,7 +274,10 @@ class PublishPermissionFlowTests(unittest.TestCase):
             body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
             save = stack.enter_context(patch.object(publish, "save_json"))
             events = []
-            body.side_effect = lambda *args: events.append("body")
+            def write_fake_journal(*args, **kwargs):
+                Path(kwargs["resume_path"]).write_text("{}", encoding="utf-8")
+                events.append("body")
+            body.side_effect = write_fake_journal
             self.client.ensure_doc_full_access.side_effect = (
                 error if error else lambda *args: events.append("permissions"))
             if invalid:
@@ -321,6 +333,25 @@ class PublishPermissionFlowTests(unittest.TestCase):
 
     def test_dry_run_does_not_construct_remote_client_even_without_editors(self):
         self.run_publish(None, dry_run=True)
+
+    def test_dry_run_with_migration_does_not_write_note_or_state(self):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        original = self.note.read_text(encoding="utf-8")
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB",
+                                                           "--mark-migrated", "notion", "--dry-run"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={}))
+            stack.enter_context(patch.object(publish, "load_json", side_effect=[self.workspace, {}]))
+            factory = stack.enter_context(patch.object(publish.fapi, "client_from_config"))
+            publish.main()
+            factory.assert_not_called()
+        self.assertEqual(self.note.read_text(encoding="utf-8"), original)
+        self.assertFalse((Path(self.temporary.name) / "state").exists())
+        self.assertFalse((self.note.parent / ".feishu-index.json.lock").exists())
 
     def test_create_grants_and_verifies_before_public_link_and_row(self):
         self.run_publish(self.editors, expect_public=True)
@@ -517,6 +548,7 @@ class PublishPermissionFlowTests(unittest.TestCase):
             stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
             stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=[]))
             body = stack.enter_context(patch.object(publish.fdoc, "replace_body"))
+            body.side_effect = lambda *args, **kwargs: Path(kwargs["resume_path"]).write_text("{}", encoding="utf-8")
             self.client.ensure_doc_full_access.side_effect = failure
             with self.assertRaises(publish.fapi.FeishuError):
                 publish.main()
@@ -589,6 +621,331 @@ class PublishPermissionFlowTests(unittest.TestCase):
                 publish.save_json(str(index_path), {"new": "data"})
         self.assertEqual(index_path.read_text(encoding="utf-8"), '{"old": "data"}')
         self.assertEqual(list(self.note.parent.glob(".feishu-index-*.tmp")), [])
+
+
+
+def crash_publisher_before_writer(note, state_root, remote_path, figure_root, stage="before"):
+    import os
+    from contextlib import ExitStack, redirect_stderr, redirect_stdout
+    from io import StringIO
+    from unittest.mock import patch
+    from test_feishu_image_concurrency import LocalDocument, LocalClient, fixture
+    remote = LocalDocument(remote_path)
+    remote.crash_clear = stage in ("clear", "clear_empty")
+
+    class Client(LocalClient):
+        def search_records(self, app, table, conditions):
+            return [{"record_id": "record", "fields": {"笔记": {"link": "/docx/doc"}}}]
+
+        def ensure_doc_full_access(self, doc, editors):
+            pass
+
+    with ExitStack() as stack:
+        stack.enter_context(redirect_stdout(StringIO()))
+        stack.enter_context(redirect_stderr(StringIO()))
+        stack.enter_context(patch.dict(os.environ, {"SOUNDING_FEISHU_STATE_DIR": state_root}))
+        stack.enter_context(patch.object(sys, "argv", ["publish.py", note, "--data", "PDB"]))
+        stack.enter_context(patch.object(publish.config, "feishu", return_value={
+            "editor_open_ids": ["ou_" + "a" * 32], "image_concurrency": 1}))
+        stack.enter_context(patch.object(publish.fapi, "client_from_config", return_value=Client(remote, primary=True)))
+        stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
+        figures = [] if stage == "clear_empty" else fixture(figure_root)
+        stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=figures))
+        if stage == "before":
+            stack.enter_context(patch.object(publish.fdoc, "replace_body", side_effect=lambda *args, **kwargs: os._exit(73)))
+        publish.main()
+
+
+class PublishRealImageIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        import json
+        from unittest.mock import patch
+        from test_feishu_image_concurrency import LocalDocument, fixture
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.notes = self.root / "clone" / "notes"
+        self.notes.mkdir(parents=True)
+        self.note = self.notes / "paper.md"
+        tables = "\n\n".join("| A | B |\n| --- | --- |\n| a | b |" for _ in range(11))
+        self.note.write_text(NOTE + "\n\n## Results\nFig. 1 explains one.\n\nFig. 2 explains two.\n\nFig. 3 explains three.\n\n" + tables, encoding="utf-8")
+        self.workspace = {"app_token": "app", "folder_token": "folder", "tables": {"papers": "table"}}
+        (self.notes / ".feishu-workspace.json").write_text(json.dumps(self.workspace), encoding="utf-8")
+        self.state_root = self.root / "shared"
+        env = patch.dict("os.environ", {"SOUNDING_FEISHU_STATE_DIR": str(self.state_root)})
+        env.start(); self.addCleanup(env.stop)
+        self.remote = LocalDocument(self.root / "remote.json")
+        self.figures = fixture(self.root)
+        self.records = {"record": {"record_id": "record", "fields": {
+            "笔记": {"link": "/docx/doc"}, "citekey": "20861cd95b"}}}
+        self.editor = ["ou_" + "a" * 32]
+        self.factory_calls = 0
+
+    def run_publish(self, figures=None, mutate_writer=None, use_manifest=False):
+        from contextlib import ExitStack, redirect_stderr, redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        from test_feishu_image_concurrency import LocalClient
+        remote, records = self.remote, self.records
+
+        class Client(LocalClient):
+            def search_records(self, app, table, conditions):
+                return [records["record"]]
+
+            def ensure_doc_full_access(self, doc, editors):
+                pass
+
+            def update_record(self, app, table, record_id, fields):
+                records[record_id]["fields"].update(fields)
+                return records[record_id]
+
+            def doc_url(self, doc):
+                return "/docx/" + doc
+
+            def doc_text(self, doc):
+                return "x" * 600
+
+        client = Client(remote, primary=True)
+        calls = []
+        def factory(cfg):
+            calls.append(1)
+            self.factory_calls += 1
+            return client if len(calls) == 1 else remote.client()
+        with ExitStack() as stack:
+            stack.enter_context(redirect_stdout(StringIO()))
+            stack.enter_context(redirect_stderr(StringIO()))
+            stack.enter_context(patch.object(sys, "argv", ["publish.py", str(self.note), "--data", "PDB"]))
+            stack.enter_context(patch.object(publish.config, "feishu", return_value={
+                "editor_open_ids": self.editor, "image_concurrency": 1}))
+            stack.enter_context(patch.object(publish.fapi, "client_from_config", side_effect=factory))
+            stack.enter_context(patch.object(publish.fdoc, "orphan_figure_files", return_value=[]))
+            if not use_manifest:
+                stack.enter_context(patch.object(publish.fdoc, "note_figures", return_value=self.figures if figures is None else figures))
+            if mutate_writer is not None:
+                stack.enter_context(patch.object(publish.fdoc, "replace_body", side_effect=mutate_writer))
+            return publish.main()
+
+    def shared_state(self):
+        import json
+        registries = list(self.state_root.glob("*/registry.json"))
+        self.assertEqual(len(registries), 1)
+        registry = json.loads(registries[0].read_text(encoding="utf-8"))
+        papers = list(registry["papers"].values())
+        self.assertEqual(len(papers), 1)
+        return papers[0]
+
+    def journal(self):
+        import json
+        journals = list(self.state_root.glob("*/images/*.json"))
+        self.assertEqual(len(journals), 1)
+        return json.loads(journals[0].read_text(encoding="utf-8"))
+
+    def test_invalid_figure_preflight_preserves_empty_and_completed_state(self):
+        from unittest.mock import patch
+        missing = self.root / "missing.png"
+        first = self.figures[0]
+        cases = [
+            [(first[0], first[1], "bad label")],
+            [first, (self.figures[1][0], "second", first[2])],
+            [(str(missing), "missing", "fig1")],
+        ]
+        for invalid in cases:
+            with self.subTest(invalid=invalid):
+                factory_calls = self.factory_calls
+                with self.assertRaises((ValueError, OSError)):
+                    self.run_publish(figures=invalid)
+                self.assertEqual(self.factory_calls, factory_calls)
+                self.assertEqual(self.shared_state(), {})
+                self.assertEqual(self.remote.clear_count, 0)
+                self.assertEqual(list(self.state_root.glob("*/images/*.json")), [])
+        self.run_publish()
+        old_journal = self.journal()
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nupdated revision\n", encoding="utf-8")
+        for invalid in cases:
+            with self.subTest(completed=True, invalid=invalid):
+                with self.assertRaises((ValueError, OSError)):
+                    self.run_publish(figures=invalid)
+                self.assertEqual(self.shared_state()["phase"], "complete")
+                self.assertEqual(self.remote.clear_count, 1)
+                self.assertEqual(self.journal(), old_journal)
+        real_open = open
+        target = str(self.figures[0][0])
+        def denied(path, mode="r", *args, **kwargs):
+            if str(path) == target and "b" in mode:
+                raise PermissionError("simulated unreadable image")
+            return real_open(path, mode, *args, **kwargs)
+        with patch("builtins.open", side_effect=denied):
+            with self.assertRaises((ValueError, OSError)):
+                self.run_publish()
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.assertEqual(self.remote.clear_count, 1)
+        self.run_publish()
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.assertEqual(self.remote.clear_count, 2)
+
+    def test_missing_manifest_file_fails_without_poison_and_retry_succeeds(self):
+        import json
+        folder = self.notes / "figs" / "paper"
+        folder.mkdir(parents=True)
+        manifest = folder / "manifest.json"
+        manifest.write_text(json.dumps({"figures": [{"label": "fig1", "page": 1}]}), encoding="utf-8")
+        image = folder / "fig1.png"
+        with self.assertRaises((OSError, ValueError)):
+            self.run_publish(use_manifest=True)
+        self.assertEqual(self.factory_calls, 0)
+        self.assertEqual(self.shared_state(), {})
+        self.assertEqual(self.remote.clear_count, 0)
+        self.assertEqual(list(self.state_root.glob("*/images/*.json")), [])
+        image.write_bytes(b"first image")
+        self.run_publish(use_manifest=True)
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.assertEqual(self.remote.clear_count, 1)
+        image.unlink()
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nupdated revision\n", encoding="utf-8")
+        calls = self.factory_calls
+        with self.assertRaises((OSError, ValueError)):
+            self.run_publish(use_manifest=True)
+        self.assertEqual(self.factory_calls, calls)
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.assertEqual(self.remote.clear_count, 1)
+        image.write_bytes(b"restored image")
+        self.run_publish(use_manifest=True)
+        self.assertEqual(self.shared_state()["phase"], "complete")
+        self.assertEqual(self.remote.clear_count, 2)
+
+    def test_existing_document_initializes_empty_journal_then_adds_figures(self):
+        self.run_publish(figures=[])
+        self.assertEqual(self.journal()["identity"]["figures"], [])
+        self.assertEqual(self.remote.clear_count, 1)
+        self.run_publish(figures=[])
+        self.assertEqual(self.remote.clear_count, 1)
+        self.run_publish()
+        self.assertEqual(len(self.journal()["identity"]["figures"]), 3)
+        self.assertEqual(self.remote.clear_count, 2)
+
+    def test_complete_revisions_repeat_text_figure_and_removal(self):
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nnew text\n", encoding="utf-8")
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 2)
+        Path(self.figures[0][0]).write_bytes(b"new image bytes")
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 3)
+        self.run_publish(figures=[])
+        self.assertEqual(self.remote.clear_count, 4)
+        self.assertEqual(self.journal()["identity"]["figures"], [])
+        self.run_publish(figures=[])
+        self.assertEqual(self.remote.clear_count, 4)
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 5)
+
+    def test_incomplete_revision_rejects_changed_and_removed_then_resumes(self):
+        self.run_publish()
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nnew revision\n", encoding="utf-8")
+        revision = self.note.read_text(encoding="utf-8")
+        self.remote.fail["fig2.png"] = "fail"
+        with self.assertRaises(publish.fapi.FeishuError):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 2)
+        attempts = self.remote.attempts[:]
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.run_publish(figures=[])
+        self.note.write_text(revision + "changed again", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 2)
+        self.assertEqual(self.remote.attempts, attempts)
+        self.note.write_text(revision, encoding="utf-8")
+        self.run_publish()
+        self.assertEqual(self.remote.clear_count, 2)
+        self.assertEqual(self.remote.attempts.count("fig1.png"), 2)
+        self.assertEqual(self.remote.attempts.count("fig2.png"), 3)
+
+    def test_crash_before_transition_cannot_reuse_completion_authority(self):
+        self.run_publish()
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nnew revision\n", encoding="utf-8")
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_publish(mutate_writer=KeyboardInterrupt())
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
+
+    def test_real_process_death_after_intent_cannot_reuse_authority(self):
+        import multiprocessing
+        self.run_publish()
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nchanged\n", encoding="utf-8")
+        process = multiprocessing.get_context("spawn").Process(target=crash_publisher_before_writer, args=(
+            str(self.note), str(self.state_root), str(self.root / "remote.json"), str(self.root)))
+        process.start(); process.join(20)
+        if process.is_alive():
+            process.terminate(); process.join(5)
+            self.fail("crash fixture did not exit")
+        self.assertEqual(process.exitcode, 73)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
+
+    def test_real_process_death_during_new_skeleton_fails_closed(self):
+        import multiprocessing
+        from test_feishu_image_concurrency import LocalDocument
+        self.run_publish()
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nnew revision\n", encoding="utf-8")
+        remote_path = self.root / "remote.json"
+        process = multiprocessing.get_context("spawn").Process(target=crash_publisher_before_writer, args=(
+            str(self.note), str(self.state_root), str(remote_path), str(self.root), "clear"))
+        process.start(); process.join(20)
+        if process.is_alive():
+            process.terminate(); process.join(5)
+            self.fail("crash fixture did not exit")
+        self.assertEqual(process.exitcode, 72)
+        self.assertEqual(self.journal()["phase"], "building")
+        self.remote = LocalDocument(remote_path)
+        self.assertEqual(self.remote.clear_count, 2)
+        with self.assertRaisesRegex(ValueError, "incomplete|uncertain"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 2)
+
+    def test_crash_during_figure_removal_blocks_replay(self):
+        import multiprocessing
+        from test_feishu_image_concurrency import LocalDocument
+        self.run_publish()
+        remote_path = self.root / "remote.json"
+        process = multiprocessing.get_context("spawn").Process(target=crash_publisher_before_writer, args=(
+            str(self.note), str(self.state_root), str(remote_path), str(self.root), "clear_empty"))
+        process.start(); process.join(20)
+        if process.is_alive():
+            process.terminate(); process.join(5)
+            self.fail("crash fixture did not exit")
+        self.assertEqual(process.exitcode, 72)
+        self.assertEqual(self.journal()["phase"], "building")
+        self.remote = LocalDocument(remote_path)
+        with self.assertRaisesRegex(ValueError, "incomplete|uncertain"):
+            self.run_publish(figures=[])
+        self.assertEqual(self.remote.clear_count, 2)
+
+    def test_changed_remote_document_is_not_overwritten(self):
+        self.run_publish()
+        block = next(b for b in self.remote.blocks.values() if b.get("text", {}).get("elements"))
+        block["text"]["elements"] = []
+        self.note.write_text(self.note.read_text(encoding="utf-8") + "\nnew revision\n", encoding="utf-8")
+        attempts = self.remote.attempts[:]
+        with self.assertRaisesRegex(ValueError, "changed|incomplete"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
+        self.assertEqual(self.remote.attempts, attempts)
+
+    def test_missing_initialized_checkpoint_fails_before_client(self):
+        self.run_publish()
+        journals = list(self.state_root.glob("*/images/*.json"))
+        self.assertEqual(len(journals), 1)
+        journals[0].unlink()
+        with self.assertRaisesRegex(RuntimeError, "checkpoint is missing"):
+            self.run_publish()
+        self.assertEqual(self.remote.clear_count, 1)
 
 
 

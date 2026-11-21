@@ -4,6 +4,11 @@
     python scripts/publish.py notes/<citekey>.md --data PDB,AlphaFold-DB
     python scripts/publish.py notes/<citekey>.md --dry-run
 
+feishu.paper_concurrency and feishu.image_concurrency accept integers 1–8
+(default 3). All local clones must use the same user-scoped state directory;
+SOUNDING_FEISHU_STATE_DIR overrides ~/.sounding/feishu. This coordination does
+not protect other computers, older publishers, or manual remote changes.
+
 What it does, in order:
 
 1. reads the note's front matter (标题/发表/类型/citekey), the 速览第 10 行的去留
@@ -37,6 +42,7 @@ from urllib.parse import urlsplit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config  # noqa: E402
 import feishu_api as fapi  # noqa: E402
+import feishu_concurrency as concurrency  # noqa: E402
 import feishu_doc as fdoc  # noqa: E402
 import feishu_schema as fschema  # noqa: E402
 
@@ -76,6 +82,20 @@ def save_json(path, data):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def update_index(path, key, entry):
+    """Merge only this paper while holding the workspace index lock."""
+    with concurrency.locked_index(path):
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                current = json.load(f)
+        else:
+            current = {}
+        if not isinstance(current, dict):
+            raise ValueError("invalid Feishu index")
+        current[key] = entry
+        save_json(path, current)
 
 
 def normalize_publication_time(value):
@@ -283,6 +303,17 @@ def existing_note_doc_id(fields, fcfg):
     return match.group(1)
 
 
+def read_record(fc, ws, record_id):
+    if not isinstance(record_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", record_id):
+        raise ValueError("Invalid record identifier in publication state")
+    path = f"/open-apis/bitable/v1/apps/{ws['app_token']}/tables/{ws['tables']['papers']}/records/{record_id}"
+    result = fc.get(path)
+    row = result.get("record") if isinstance(result, dict) else None
+    if not isinstance(row, dict) or row.get("record_id") != record_id:
+        raise RuntimeError("Could not verify the recorded Feishu row; repair before retrying")
+    return row
+
+
 def write_zotero(citekey, url, tags, timings, title=None, alt_titles=()):
     """Extra gains ``Citation Key`` + ``Feishu: <url>``; data family keeps ``d:``."""
     import paper_identity as identity
@@ -356,10 +387,13 @@ def main():
             sys.exit("--mark-migrated 需要旧后端名（如 --mark-migrated notion）；自动推断失败")
         with open(note_path, encoding="utf-8", newline="") as f:
             text = f.read()
-        with open(note_path, "w", encoding="utf-8", newline="") as f:
-            f.write(mark_migrated(text, source, "飞书"))
-        props = parse_note(note_path)
-        print(f"迁移标记：从 {source} 迁入，主后端 = 飞书", file=sys.stderr)
+        migrated = mark_migrated(text, source, "飞书")
+        if not args.dry_run:
+            with open(note_path, "w", encoding="utf-8", newline="") as f:
+                f.write(migrated)
+            props = parse_note(note_path)
+        marker_label = "迁移标记（预览）" if args.dry_run else "迁移标记"
+        print(f"{marker_label}：从 {source} 迁入，主后端 = 飞书", file=sys.stderr)
     split = lambda s: [p.strip() for p in (s or "").split(",") if p.strip()]
     tags = {"data": split(args.data), "read": args.read}
 
@@ -377,9 +411,11 @@ def main():
         sys.exit("飞书库未初始化：先跑 python scripts/feishu_setup.py --apply")
 
     index_path = os.path.join(root, INDEX)
-    index = load_json(index_path, {})
-    entry = index.get(props["citekey"], {})
-    timings = {}
+    if args.dry_run:
+        index = load_json(index_path, {})
+        entry = index.get(props["citekey"], {})
+    else:
+        entry = {}
 
     plan = {
         "citekey": props["citekey"], "title": props["title"],
@@ -390,23 +426,91 @@ def main():
     if not props["doi"]:
         print("提示：笔记里没有 DOI，表格这一列会空着；在「## 定位素材」加一行 "
               "`原文：<标题> · <发表> <年> · DOI 10.xxxx/xxxx` 即可。", file=sys.stderr)
+    paper_workers = concurrency.worker_count(fcfg, "paper_concurrency")
+    image_workers = concurrency.worker_count(fcfg, "image_concurrency")
     if args.dry_run:
         print(json.dumps({"plan": plan, "fields": record_fields(props, tags, None),
                           "missing": gaps}, ensure_ascii=False, indent=2))
         return
 
     editor_ids = fapi.validate_editor_open_ids(fcfg.get("editor_open_ids"))
+    with concurrency.Publication(ws, fcfg, props["citekey"], props["doi"], paper_workers) as publication:
+        with concurrency.locked_index(index_path):
+            index = load_json(index_path, {})
+            if not isinstance(index, dict):
+                raise ValueError("invalid Feishu index")
+            entry = index.get(props["citekey"], {})
+        publish_locked(args, note_path, ws, fcfg, props, tags, index_path, entry,
+                       publication, editor_ids, image_workers)
+
+
+def definitive_rate_limit(exc):
+    return isinstance(exc, fapi.FeishuRateLimitError)
+
+
+def publish_locked(args, note_path, ws, fcfg, props, tags, index_path, entry,
+                   publication, editor_ids, image_workers):
+    state = publication.get_state()
+    if state.get("phase") == "document_creating":
+        raise RuntimeError(publication.repair_message("document"))
+    if not isinstance(entry, dict):
+        raise ValueError("Invalid local index entry")
+    if state.get("phase") not in (None, "document_creating", "pending", "record_creating", "record_known", "complete"):
+        raise RuntimeError("Invalid shared recovery state; repair before publishing")
+    shared_doc = state.get("doc_id")
+    previous_complete_doc = shared_doc if state.get("phase") == "complete" else None
+    if shared_doc is not None and (not isinstance(shared_doc, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", shared_doc)):
+        raise RuntimeError("Invalid shared document identifier; repair before publishing")
+    if state.get("phase") in ("pending", "record_creating", "record_known", "complete") and not shared_doc:
+        raise RuntimeError("Missing shared document identifier; repair before publishing")
+    if "make_public" in state and not isinstance(state["make_public"], bool):
+        raise RuntimeError("Invalid shared publication permissions; repair before publishing")
+    if "body_journal" in state and state["body_journal"] is not True:
+        raise RuntimeError("Invalid shared body journal marker; repair before publishing")
+    if state.get("body_journal") and not os.path.isfile(publication.resume_path):
+        raise RuntimeError("The shared body checkpoint is missing; inspect the document and restore the "
+                           "checkpoint before retrying. Do not recreate the document blindly.")
+    for source, values in (("shared recovery state", state), ("local index", entry)):
+        if "record_id" in values and (not isinstance(values["record_id"], str)
+                                      or not re.fullmatch(r"[A-Za-z0-9_-]+", values["record_id"])):
+            raise ValueError(f"Invalid record identifier in {source}")
+    if state.get("phase") in ("record_known", "complete") and not state.get("record_id"):
+        raise RuntimeError("Missing shared record identifier; repair before publishing")
+    local_doc = entry.get("doc_id")
+    if local_doc is not None and (not isinstance(local_doc, str)
+                                  or (local_doc and not re.fullmatch(r"[A-Za-z0-9_-]+", local_doc))):
+        raise ValueError("Invalid document identifier in local index")
+    if shared_doc and local_doc and shared_doc != local_doc:
+        raise ValueError("Shared recovery state conflicts with the local index")
+    orphans = fdoc.orphan_figure_files(note_path)
+    if orphans:
+        names = "、".join(os.path.basename(p) for p in orphans)
+        sys.exit(
+            f"缺 notes/figs/{props['citekey']}/manifest.json，目录里却有裁图：{names}。"
+            "这些图不会上传，先跑 `python scripts/fig_upload.py crop <pdf> "
+            f"--citekey {props['citekey']} --fig …` 生成 manifest 再发布"
+        )
+    figures = list(fdoc.note_figures(note_path))
+    fdoc.validate_figure_inputs(shared_doc or local_doc or "preflight", props["md"], figures)
     fc = fapi.client_from_config(fcfg)
+    timings = {}
     started = time.time()
     try:
         rows = find_papers(fc, ws, props["citekey"])
+        shared_record = state.get("record_id") or entry.get("record_id")
+        if not rows and shared_record:
+            rows = [read_record(fc, ws, shared_record)]
+        if state.get("phase") == "record_creating" and not rows:
+            raise RuntimeError(publication.repair_message("record"))
+        if rows and shared_record and rows[0].get("record_id") != shared_record:
+            raise ValueError("Shared recovery state conflicts with the existing row")
         timings["citekey_query"] = round((time.time() - started) * 1000)
         if len(rows) > 1:
             sys.exit(f"库里有 {len(rows)} 行同 citekey；先合并再发布")
 
         fields = record_fields(props, tags, None)
-        doc_id = entry.get("doc_id")
-        make_public = not rows and (not doc_id or entry.get("state") == "pending")
+        doc_id = shared_doc or entry.get("doc_id")
+        make_public = not rows and (not doc_id or state.get("make_public", entry.get("state") == "pending"))
         if rows:
             existing_fields = rows[0].get("fields") or {}
             if not isinstance(existing_fields, dict):
@@ -419,33 +523,57 @@ def main():
             if not rows[0].get("record_id"):
                 raise ValueError("Existing row is missing its record identifier")
             doc_id = row_doc_id
+            if existing_fields.get("citekey") and existing_fields["citekey"] != props["citekey"]:
+                fields.pop("citekey", None)
+            if state.get("phase") != "complete":
+                state.update(phase="record_known", doc_id=doc_id, record_id=rows[0]["record_id"],
+                             make_public=False)
+                publication.set_state(state)
 
         if not doc_id:
             started = time.time()
-            doc_id = fc.create_doc(props["title"] or props["citekey"], ws["folder_token"])
-            timings["doc_create"] = round((time.time() - started) * 1000)
-            index[props["citekey"]] = {"doc_id": doc_id, "state": "pending"}
+            prior_state = dict(state)
+            state = {"phase": "document_creating", "make_public": True}
+            publication.set_state(state)
             try:
-                save_json(index_path, index)
+                doc_id = fc.create_doc(props["title"] or props["citekey"], ws.get("folder_token", ""))
+            except Exception as exc:
+                if definitive_rate_limit(exc):
+                    publication.set_state(prior_state)
+                    raise
+                raise RuntimeError(publication.repair_message("document")) from None
+            if not isinstance(doc_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", doc_id):
+                raise RuntimeError(publication.repair_message("document"))
+            state = {"phase": "pending", "doc_id": doc_id, "make_public": True}
+            publication.set_state(state)
+            timings["doc_create"] = round((time.time() - started) * 1000)
+            try:
+                update_index(index_path, props["citekey"], {"doc_id": doc_id, "state": "pending"})
             except Exception:
                 raise RuntimeError("could not record the new document for recovery; "
                                    "manual recovery may be required") from None
+        elif not shared_doc:
+            state = {"phase": "pending", "doc_id": doc_id, "make_public": make_public}
+            if rows:
+                state.update(phase="record_known", record_id=rows[0]["record_id"])
+            publication.set_state(state)
 
         fc.ensure_doc_full_access(doc_id, editor_ids)
 
         started = time.time()
-        orphans = fdoc.orphan_figure_files(note_path)
-        if orphans:
-            names = "、".join(os.path.basename(p) for p in orphans)
-            sys.exit(
-                f"缺 notes/figs/{props['citekey']}/manifest.json，目录里却有裁图：{names}。"
-                "这些图不会上传，先跑 `python scripts/fig_upload.py crop <pdf> "
-                f"--citekey {props['citekey']} --fig …` 生成 manifest 再发布"
-            )
-        figures = fdoc.note_figures(note_path)
         # Pass the full note so replace_body can render the 速览 callout plus the
         # body; the table count check below still uses props["body"].
-        fdoc.replace_body(fc, doc_id, props["md"], figures)
+        resume_path = publication.resume_path
+        os.makedirs(os.path.dirname(resume_path), mode=0o700, exist_ok=True)
+        # Consume completion authority before the document writer can mutate it.
+        state.update(phase="record_known" if state.get("record_id") else "pending",
+                     doc_id=doc_id, body_journal=True)
+        publication.set_state(state)
+        fdoc.replace_body(fc, doc_id, props["md"], figures,
+                          resume_path=resume_path,
+                          client_factory=lambda: fapi.client_from_config(fcfg),
+                          max_workers=image_workers,
+                          previous_publication_complete=previous_complete_doc == doc_id)
         timings["body_write"] = round((time.time() - started) * 1000)
 
         existing_link = existing_fields["笔记"]["link"] if rows else None
@@ -462,8 +590,24 @@ def main():
             fc.update_record(ws["app_token"], ws["tables"]["papers"], record_id, fields)
             action = "row_updated"
         else:
-            rec = fc.create_record(ws["app_token"], ws["tables"]["papers"], fields)
-            record_id = rec.get("record_id")
+            prior_state = dict(state)
+            state.update(phase="record_creating", doc_id=doc_id)
+            publication.set_state(state)
+            try:
+                rec = fc.create_record(ws["app_token"], ws["tables"]["papers"], fields)
+            except Exception as exc:
+                if definitive_rate_limit(exc):
+                    publication.set_state(prior_state)
+                    raise
+                raise RuntimeError(publication.repair_message("record")) from None
+            record_id = rec.get("record_id") if isinstance(rec, dict) else None
+            if not isinstance(record_id, str) or not record_id:
+                raise RuntimeError(publication.repair_message("record"))
+            state.update(phase="record_known", record_id=record_id)
+            publication.set_state(state)
+            created_row = read_record(fc, ws, record_id)
+            if existing_note_doc_id(created_row.get("fields"), fcfg) != doc_id:
+                raise ValueError("Created row does not link to the expected document")
             action = "row_created"
         timings["record_write"] = round((time.time() - started) * 1000)
 
@@ -481,12 +625,14 @@ def main():
             sys.exit(f"回读不通过：{expectations} blocks={len(blocks)} text={len(text)} "
                      f"images={images}/{len(figures)} tables={tables}")
 
-        index[props["citekey"]] = {
+        state.update(phase="complete", doc_id=doc_id, record_id=record_id, make_public=False)
+        publication.set_state(state)
+        entry = {
             "doc_id": doc_id, "url": url, "record_id": record_id,
             "rev": props["rev"], "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
         try:
-            save_json(index_path, index)
+            update_index(index_path, props["citekey"], entry)
         except Exception:
             raise RuntimeError("could not record completed publication; verify before retrying") from None
         zotero = optional_zotero(props, url, tags, timings) if args.zotero else "not requested"
@@ -503,6 +649,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except concurrency.BusyError as e:
+        sys.exit(str(e))
     except fapi.FeishuError as e:
         code = e.code if isinstance(e.code, int) else -1
+        if definitive_rate_limit(e):
+            sys.exit(f"feishu rate limit {code}: request rejected; retry later")
         sys.exit(f"feishu error {code}: request failed")

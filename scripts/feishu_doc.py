@@ -25,11 +25,23 @@ section headings are tinted by level (H2 blue, H3 purple, H4 grey).
 """
 from __future__ import annotations
 
-import re
+import copy
+import hashlib
+import json
 import os
+import re
 import sys
+import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+if __package__:
+    from . import feishu_api as _fapi
+else:
+    import feishu_api as _fapi
 
 # Inline HTML in the note template has no meaning to the converter.
 _HTML = [(re.compile(p, re.I), r) for p, r in (
@@ -214,6 +226,13 @@ def append_table(client, doc_id, rows, width):
     for block in blocks:
         by_parent.setdefault(block.get("parent_id"), []).append(block)
     cells = by_parent.get(table_id, [])
+    if getattr(client, "_strict_skeleton", False) is True:
+        if len(cells) != len(rows) * width:
+            raise ValueError("incomplete table skeleton")
+        for cell in cells:
+            inner = by_parent.get(cell.get("block_id"), [])
+            if len(inner) != 1 or inner[0].get("block_type") != 2:
+                raise ValueError("incomplete table cell skeleton")
     updates = []
     for r, row in enumerate(rows):
         for col, text in enumerate(row):
@@ -322,6 +341,8 @@ def _append_digest_callout(client, doc_id, digest):
     # first digest line so the callout does not start with a blank line.
     kids = client.block_children(doc_id, callout_id)
     empty = next((b for b in kids if b.get("block_type") == 2), None)
+    if getattr(client, "_strict_skeleton", False) is True and empty is None:
+        raise ValueError("incomplete callout skeleton")
     if empty is not None and items:
         content, color = items.pop(0)
         client.batch_update_blocks(doc_id, [{
@@ -413,7 +434,7 @@ def _block_end(lines, index, allowed=None):
     return last
 
 
-def _append_body(client, doc_id, body, figures):
+def _append_body(client, doc_id, body, figures, figure_writer=None):
     """Write the body, dropping each figure right after the paragraph that
     narrates it.
 
@@ -423,6 +444,8 @@ def _append_body(client, doc_id, body, figures):
     paragraph that actually discusses them, and any figure never mentioned in
     prose falls back to the end. Figures sharing a paragraph keep mention order.
     """
+    if figure_writer is None:
+        figure_writer = lambda c, d, p, caption, label: add_figure(c, d, p, caption)
     lines = body.splitlines()
     # 图注 lines feed the caption under each figure; they are not body prose.
     lines = [line for line in lines if not _FIG_CAPTION.match(line.strip())]
@@ -431,13 +454,13 @@ def _append_body(client, doc_id, body, figures):
     for path, caption, label in figures:
         m = _FIG_LABEL.match(label)
         if m:
-            by_num.setdefault(m.group(1), []).append((path, caption))
+            by_num.setdefault(m.group(1), []).append((path, caption, label))
 
-    insertions = []  # (line_index, char_pos, path, caption)
+    insertions = []  # (line_index, char_pos, path, caption, label)
     placed = set()
     used_lines = set()
     for num in by_num:
-        path, caption = by_num[num][0]
+        path, caption, label = by_num[num][0]
         anchor = None
         for i, pos, _end in _fig_mentions(lines, num, allowed):
             if i not in used_lines:
@@ -447,13 +470,13 @@ def _append_body(client, doc_id, body, figures):
             continue
         line_idx, char_pos = anchor
         used_lines.add(line_idx)
-        insertions.append((_block_end(lines, line_idx, allowed), char_pos, path, caption))
+        insertions.append((_block_end(lines, line_idx, allowed), char_pos, path, caption, label))
         placed.add(num)
     insertions.sort(key=lambda item: (item[0], item[1]))
 
     by_line = {}
-    for line_idx, _char_pos, path, caption in insertions:
-        by_line.setdefault(line_idx, []).append((path, caption))
+    for line_idx, _char_pos, path, caption, label in insertions:
+        by_line.setdefault(line_idx, []).append((path, caption, label))
 
     buf = []
     for i, line in enumerate(lines):
@@ -461,14 +484,14 @@ def _append_body(client, doc_id, body, figures):
         if i in by_line:
             append_md(client, doc_id, "\n".join(buf))
             buf = []
-            for path, caption in by_line[i]:
-                add_figure(client, doc_id, path, caption)
+            for path, caption, label in by_line[i]:
+                figure_writer(client, doc_id, path, caption, label)
     append_md(client, doc_id, "\n".join(buf))
 
     for num in by_num:
         if num not in placed:
-            for path, caption in by_num[num]:
-                add_figure(client, doc_id, path, caption)
+            for path, caption, label in by_num[num]:
+                figure_writer(client, doc_id, path, caption, label)
 
 
 def append_md(client, doc_id, md):
@@ -485,12 +508,497 @@ def append_md(client, doc_id, md):
     return client
 
 
-def replace_body(client, doc_id, md, figures=()):
-    """Rebuild the whole document: 速览 callout, then the body with inline figures."""
+_JOURNAL_VERSION = 1
+_MAX_IMAGE_WORKERS = 32
+
+
+@contextmanager
+def _journal_lock(path):
+    # The lock file is deliberately retained: unlinking it can split waiters
+    # across two inodes and permit overlapping publishes.
+    with open(path + ".lock", "a+b") as lock:
+        lock.seek(0, os.SEEK_END)
+        if lock.tell() == 0:
+            lock.write(b"\0")
+            lock.flush()
+        lock.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise RuntimeError("image checkpoint is already in use") from exc
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise RuntimeError("image checkpoint is already in use") from exc
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _journal_digest(state):
+    encoded = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _save_journal(path, state):
+    directory = os.path.dirname(path)
+    fd, temporary = tempfile.mkstemp(prefix=".feishu-images-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            payload = dict(state, checksum=_journal_digest(state))
+            json.dump(payload, stream, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        if os.name != "nt":
+            directory_fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _figure_number(label, seen):
+    match = _FIG_LABEL.fullmatch(label) if isinstance(label, str) else None
+    if not match:
+        raise ValueError("figure label must be a numbered fig/figure label, e.g. fig1")
+    number = match.group(1)
+    key = number.lstrip("0") or "0"
+    if key in seen:
+        raise ValueError("duplicate figure number")
+    seen.add(key)
+    return number
+
+
+def _figure_inputs(doc_id, md, figures):
+    if not isinstance(doc_id, str) or not doc_id or not isinstance(md, str):
+        raise ValueError("document id and note are required")
+    descriptions, contents, nums = [], {}, set()
+    for entry in figures:
+        try:
+            path, caption, label = entry
+            path = os.fspath(path)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("figure must be a (path, caption, label) triple") from exc
+        if not isinstance(path, str) or not path or not isinstance(caption, str):
+            raise ValueError("figure path and caption must be strings")
+        _figure_number(label, nums)
+        try:
+            with open(path, "rb") as stream:
+                blob = stream.read()
+        except OSError:
+            raise ValueError(f"figure {label!r} is missing or unreadable") from None
+        name = os.path.basename(path)
+        descriptions.append({"name": name, "caption": caption, "label": label,
+                             "sha256": hashlib.sha256(blob).hexdigest()})
+        contents[label] = (blob, name, path, caption)
+    identity = {"doc_id": doc_id, "note_sha256": hashlib.sha256(md.encode("utf-8")).hexdigest(),
+                "figures": descriptions}
+    return identity, contents
+
+
+def validate_figure_inputs(doc_id, md, figures):
+    """Validate note and figure inputs locally, without mutating files or Feishu."""
+    _figure_inputs(doc_id, md, figures)
+
+
+def _block_snapshot(client, doc_id):
+    roots = client.doc_children(doc_id)
+    blocks = client.all_blocks(doc_id)
+    if not isinstance(roots, list) or not isinstance(blocks, list):
+        raise ValueError("invalid remote block readback")
+    root_ids = []
+    for block in roots:
+        if not isinstance(block, dict) or not isinstance(block.get("block_id"), str) or not block["block_id"]:
+            raise ValueError("invalid remote root block")
+        root_ids.append(block["block_id"])
+    normal, tokens = {}, {}
+    for block in blocks:
+        if not isinstance(block, dict):
+            raise ValueError("invalid remote block")
+        block = copy.deepcopy(block)
+        block_id = block.get("block_id")
+        if not isinstance(block_id, str) or not block_id or block_id in normal:
+            raise ValueError("invalid or duplicate remote block id")
+        # These bookkeeping fields can change without an edit to the content.
+        for key in ("revision_id", "create_time", "update_time"):
+            block.pop(key, None)
+        if block.get("block_type") == 27:
+            image = block.get("image")
+            if not isinstance(image, dict):
+                raise ValueError("invalid remote image block")
+            token = image.pop("token", "")
+            if token is None:
+                token = ""
+            if not isinstance(token, str):
+                raise ValueError("invalid remote image token")
+            tokens[block_id] = token
+        normal[block_id] = block
+    for parent in normal.values():
+        children = parent.get("children", [])
+        if not isinstance(children, list) or any(not isinstance(child, str) or child not in normal
+                                                for child in children):
+            raise ValueError("incomplete remote block tree")
+    if len(set(root_ids)) != len(root_ids) or any(block_id not in normal for block_id in root_ids):
+        raise ValueError("inconsistent remote block tree")
+    return {"roots": root_ids, "blocks": [normal[key] for key in sorted(normal)]}, tokens
+
+
+def _load_journal(path, identity=None):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            state = json.load(stream, object_pairs_hook=_unique_object)
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError("invalid image checkpoint") from exc
+    if not isinstance(state, dict) or set(state) != {"version", "identity", "phase", "snapshot", "images", "checksum"}:
+        raise ValueError("invalid image checkpoint")
+    checksum = state.pop("checksum")
+    if not isinstance(checksum, str) or checksum != _journal_digest(state):
+        raise ValueError("image checkpoint checksum mismatch")
+    if type(state["version"]) is not int or state["version"] != _JOURNAL_VERSION:
+        raise ValueError("unsupported image checkpoint version")
+    stored_identity = state["identity"]
+    if (not isinstance(stored_identity, dict)
+            or set(stored_identity) != {"doc_id", "note_sha256", "figures"}
+            or not isinstance(stored_identity["doc_id"], str) or not stored_identity["doc_id"]
+            or not isinstance(stored_identity["note_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", stored_identity["note_sha256"])
+            or not isinstance(stored_identity["figures"], list)):
+        raise ValueError("invalid image checkpoint identity")
+    labels_in_identity = []
+    for figure in stored_identity["figures"]:
+        if (not isinstance(figure, dict) or set(figure) != {"name", "caption", "label", "sha256"}
+                or not all(isinstance(figure[key], str) for key in figure)
+                or not _FIG_LABEL.fullmatch(figure["label"])
+                or not re.fullmatch(r"[0-9a-f]{64}", figure["sha256"])):
+            raise ValueError("invalid image checkpoint identity")
+        labels_in_identity.append(figure["label"])
+    if len(set(labels_in_identity)) != len(labels_in_identity):
+        raise ValueError("invalid image checkpoint identity")
+    if identity is not None and stored_identity != identity:
+        raise ValueError("image checkpoint does not match document, note or figures")
+    if state["phase"] == "building":
+        raise ValueError("image skeleton is incomplete or its outcome is uncertain; preserve the "
+                         "checkpoint and inspect the document before manual recovery; "
+                         "do not delete the checkpoint or rebuild the document")
+    if state["phase"] != "ready" or not isinstance(state["snapshot"], dict) or not isinstance(state["images"], list):
+        raise ValueError("invalid image checkpoint")
+    expected_labels = set(labels_in_identity)
+    labels, ids = set(), set()
+    for image in state["images"]:
+        if not isinstance(image, dict) or set(image) != {"label", "block_id", "status", "token"}:
+            raise ValueError("invalid image checkpoint")
+        label, block_id, status, token = (image[k] for k in ("label", "block_id", "status", "token"))
+        if (not isinstance(label, str) or label not in expected_labels or label in labels
+                or not isinstance(block_id, str) or not block_id or block_id in ids
+                or status not in ("pending", "uploading", "uploaded", "patching", "confirmed")
+                or not isinstance(token, str) or (status in ("pending", "uploading")) != (token == "")):
+            raise ValueError("invalid image checkpoint")
+        labels.add(label)
+        ids.add(block_id)
+    if labels != expected_labels:
+        raise ValueError("invalid image checkpoint")
+    return state
+
+
+def _verify_snapshot(client, doc_id, state):
+    snapshot, tokens = _block_snapshot(client, doc_id)
+    if set(tokens) != {image["block_id"] for image in state["images"]}:
+        raise ValueError("remote image blocks changed or are missing")
+    expected = copy.deepcopy(state["snapshot"])
+    if not isinstance(expected, dict) or not isinstance(expected.get("blocks"), list):
+        raise ValueError("invalid image checkpoint snapshot")
+    changed = {image["block_id"] for image in state["images"]
+               if image["status"] == "patching" and tokens[image["block_id"]] == image["token"]}
+    observed = {block["block_id"]: block for block in snapshot["blocks"]}
+    for block in expected["blocks"]:
+        if isinstance(block, dict) and block.get("block_id") in changed:
+            block["image"] = copy.deepcopy(observed[block["block_id"]]["image"])
+    if snapshot != expected:
+        raise ValueError("remote document skeleton changed or is incomplete")
+    reconciled = False
+    for image in state["images"]:
+        actual = tokens[image["block_id"]]
+        status, expected = image["status"], image["token"]
+        if status == "confirmed":
+            if actual != expected:
+                raise ValueError("confirmed remote image changed or is missing")
+        elif status == "patching" and actual == expected:
+            image["status"] = "confirmed"
+            reconciled = True
+        elif actual:
+            raise ValueError("unexpected remote image token")
+    if reconciled:
+        state["snapshot"] = snapshot
+    return reconciled
+
+
+def _contains_expected(actual, expected):
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and all(
+            (key in actual and _contains_expected(actual[key], value)) or (key not in actual and value in ({}, []))
+            for key, value in expected.items())
+    if isinstance(expected, list):
+        return (isinstance(actual, list) and len(actual) == len(expected)
+                and all(_contains_expected(a, e) for a, e in zip(actual, expected)))
+    return actual == expected
+
+
+class _SkeletonClient:
+    _strict_skeleton = True
+
+    def __init__(self, client):
+        self.client = client
+        self.root_ids = []
+        self.expected_blocks = {}
+        self.expected_updates = {}
+
+    def __getattr__(self, name):
+        return getattr(self.client, name)
+
+    def append_children(self, doc_id, children, index=-1):
+        result = self._check(children, self.client.append_children(doc_id, children, index=index), doc_id)
+        self.root_ids.extend(block["block_id"] for block in result)
+        return result
+
+    def append_block_children(self, doc_id, block_id, children, index=-1):
+        result = self.client.append_block_children(doc_id, block_id, children, index=index)
+        return self._check(children, result, block_id)
+
+    def batch_update_blocks(self, doc_id, requests):
+        result = self.client.batch_update_blocks(doc_id, requests)
+        for update in requests:
+            block_id = update["block_id"]
+            if "update_text_elements" in update:
+                self.expected_updates[block_id] = copy.deepcopy(update["update_text_elements"]["elements"])
+            if "insert_table_row" in update and block_id in self.expected_blocks:
+                self.expected_blocks[block_id]["table"]["property"]["row_size"] += 1
+        return result
+
+    def _check(self, children, result, parent_id):
+        if (not isinstance(result, list) or len(result) != len(children)
+                or any(not isinstance(block, dict) or not isinstance(block.get("block_id"), str)
+                       or not block["block_id"] for block in result)):
+            raise ValueError("incomplete skeleton creation response")
+        for child, block in zip(children, result):
+            expected = copy.deepcopy(child)
+            expected["parent_id"] = parent_id
+            self.expected_blocks[block["block_id"]] = expected
+        return result
+
+    def verify(self, snapshot):
+        blocks = {block["block_id"]: block for block in snapshot["blocks"]}
+        for block_id, expected in self.expected_blocks.items():
+            if block_id not in blocks or not _contains_expected(blocks[block_id], expected):
+                raise ValueError("remote skeleton content did not match the requested blocks")
+        for block_id, elements in self.expected_updates.items():
+            actual = blocks.get(block_id, {}).get("text", {}).get("elements")
+            if not _contains_expected(actual, elements):
+                raise ValueError("remote skeleton text update was not confirmed")
+
+
+def _build_skeleton(client, doc_id, md, identity, contents, journal_path):
+    state = {"version": _JOURNAL_VERSION, "identity": identity, "phase": "building",
+             "snapshot": None, "images": []}
+    _save_journal(journal_path, state)
     client.clear_body(doc_id)
+    skeleton = _SkeletonClient(client)
+
+    def placeholder(writer, document, path, caption, label):
+        created = writer.append_children(document, [{"block_type": 27, "image": {}}])[0]
+        state["images"].append({"label": label, "block_id": created["block_id"],
+                                "status": "pending", "token": ""})
+        if caption:
+            writer.append_children(document, [_text_block(caption, _FONT_COLOR["grey"], italic=True)])
+
     digest, body = _split_note(md)
-    _append_digest_callout(client, doc_id, digest)
-    _append_body(client, doc_id, body, figures)
+    _append_digest_callout(skeleton, doc_id, digest)
+    figures = [(contents[item["label"]][2], item["caption"], item["label"])
+               for item in identity["figures"]]
+    _append_body(skeleton, doc_id, body, figures, placeholder)
+    state["snapshot"], tokens = _block_snapshot(client, doc_id)
+    skeleton.verify(state["snapshot"])
+    if (len(state["images"]) != len(identity["figures"])
+            or state["snapshot"]["roots"] != skeleton.root_ids
+            or set(tokens) != {image["block_id"] for image in state["images"]}
+            or any(tokens.values())):
+        raise ValueError("incomplete or incompatible remote image skeleton")
+    state["phase"] = "ready"
+    _save_journal(journal_path, state)
+    return state
+
+
+def _upload_images(client, doc_id, contents, state, journal_path, client_factory, max_workers):
+    clients, client_guard = [], threading.Lock()
+    local = threading.local()
+
+    def upload(image):
+        worker = getattr(local, "client", None)
+        if worker is None:
+            worker = client_factory()
+            with client_guard:
+                if worker is client or any(worker is other for other in clients):
+                    raise ValueError("client_factory must return a new independent client")
+                clients.append(worker)
+            local.client = worker
+        blob, name, _path, _caption = contents[image["label"]]
+        token = worker.upload_media(blob, name, "docx_image", image["block_id"],
+                                    extra={"drive_route_token": doc_id})
+        if not isinstance(token, str) or not token:
+            raise _fapi.FeishuUncertainError("image upload", -1,
+                                              "upload returned no token; preserve the checkpoint "
+                                              "and inspect the image block before manual recovery")
+        return token
+
+    def patch(image):
+        if _verify_snapshot(client, doc_id, state):
+            _save_journal(journal_path, state)
+        if image["status"] == "confirmed":
+            return
+        image["status"] = "patching"
+        _save_journal(journal_path, state)
+        try:
+            client.patch(f"/open-apis/docx/v1/documents/{doc_id}/blocks/{image['block_id']}",
+                         {"replace_image": {"token": image["token"]}})
+        except Exception:
+            if _verify_snapshot(client, doc_id, state):
+                _save_journal(journal_path, state)
+            if image["status"] != "confirmed":
+                raise
+        else:
+            if _verify_snapshot(client, doc_id, state):
+                _save_journal(journal_path, state)
+            if image["status"] != "confirmed":
+                raise ValueError("image attachment was not confirmed by remote readback")
+
+    errors = []
+    for image in state["images"]:
+        if image["status"] in ("uploaded", "patching"):
+            try:
+                patch(image)
+            except Exception as exc:
+                errors.append(exc)
+                break
+    if errors:
+        raise errors[0]
+
+    pending = [image for image in state["images"] if image["status"] == "pending"]
+    if pending:
+        try:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(pending))) as executor:
+                futures, waiting = {}, iter(pending)
+                stop_patching = False
+
+                def start_next():
+                    image = next(waiting, None)
+                    if image is not None:
+                        image["status"] = "uploading"
+                        _save_journal(journal_path, state)
+                        futures[executor.submit(upload, image)] = image
+
+                for _ in range(min(max_workers, len(pending))):
+                    start_next()
+                while futures:
+                    future = next(as_completed(futures))
+                    image = futures.pop(future)
+                    try:
+                        token = future.result()
+                    except Exception as exc:
+                        if isinstance(exc, _fapi.FeishuError) and not isinstance(exc, _fapi.FeishuUncertainError):
+                            image["status"] = "pending"
+                            _save_journal(journal_path, state)
+                        errors.append(exc)
+                    else:
+                        image["token"] = token
+                        image["status"] = "uploaded"
+                        _save_journal(journal_path, state)
+                        if not stop_patching:
+                            try:
+                                patch(image)
+                            except Exception as exc:
+                                errors.append(exc)
+                                stop_patching = True
+                    if not stop_patching and not errors:
+                        start_next()
+        finally:
+            for worker in clients:
+                try:
+                    worker.close()
+                except Exception as exc:
+                    errors.append(exc)
+    if errors:
+        raise errors[0]
+    if _verify_snapshot(client, doc_id, state):
+        _save_journal(journal_path, state)
+    if any(image["status"] != "confirmed" for image in state["images"]):
+        raise ValueError("not all image attachments were verified")
+
+
+def replace_body(client, doc_id, md, figures=(), *, resume_path=None, client_factory=None,
+                 max_workers=3, previous_publication_complete=False):
+    """Rebuild a note, optionally checkpointing a verified concurrent image upload."""
+    if type(previous_publication_complete) is not bool:
+        raise ValueError("previous_publication_complete must be a boolean")
+    if resume_path is None and client_factory is None:
+        if max_workers != 3 or previous_publication_complete:
+            raise ValueError("new publishing options require resume_path and client_factory")
+        figures = list(figures)
+        _figure_inputs(doc_id, md, figures)
+        client.clear_body(doc_id)
+        digest, body = _split_note(md)
+        _append_digest_callout(client, doc_id, digest)
+        _append_body(client, doc_id, body, figures)
+        return doc_id
+    if resume_path is None or not callable(client_factory):
+        raise ValueError("resume_path and client_factory are both required")
+    if type(max_workers) is not int or not 1 <= max_workers <= _MAX_IMAGE_WORKERS:
+        raise ValueError("max_workers must be an integer from 1 to 32")
+    path = os.fspath(resume_path)
+    if not isinstance(path, str) or not os.path.isabs(path):
+        raise ValueError("resume_path must be absolute")
+    identity, contents = _figure_inputs(doc_id, md, figures)
+    with _journal_lock(path):
+        if os.path.exists(path):
+            state = _load_journal(path)
+            if state["identity"] != identity:
+                if not previous_publication_complete:
+                    raise ValueError("image checkpoint does not match document, note or figures")
+                if (state["identity"]["doc_id"] != doc_id
+                        or any(image["status"] != "confirmed" for image in state["images"])):
+                    raise ValueError("previous document or publication is not fully confirmed")
+                _verify_snapshot(client, doc_id, state)
+                state = _build_skeleton(client, doc_id, md, identity, contents, path)
+            else:
+                if _verify_snapshot(client, doc_id, state):
+                    _save_journal(path, state)
+                if any(image["status"] == "uploading" for image in state["images"]):
+                    raise ValueError("an image upload outcome is uncertain; preserve the checkpoint, "
+                                     "inspect the image blocks in Feishu and recover manually; "
+                                     "do not delete the checkpoint or rebuild the document")
+        else:
+            state = _build_skeleton(client, doc_id, md, identity, contents, path)
+        _upload_images(client, doc_id, contents, state, path, client_factory, max_workers)
     return doc_id
 
 
@@ -520,41 +1028,56 @@ def note_figures(note_path, figures_root=None):
     note has one (see ``reference-science.md``), so the document explains what
     the figure shows instead of just naming it.
     """
-    import json
-
     citekey = os.path.splitext(os.path.basename(note_path))[0]
     root = figures_root or os.path.join(os.path.dirname(os.path.abspath(note_path)), "figs")
     manifest = os.path.join(root, citekey, "manifest.json")
-    if not os.path.exists(manifest):
+    try:
+        with open(manifest, encoding="utf-8") as f:
+            data = json.load(f, object_pairs_hook=_unique_object)
+    except FileNotFoundError:
         return []
-    with open(manifest, encoding="utf-8") as f:
-        data = json.load(f)
+    except OSError:
+        raise ValueError("figure manifest is unreadable") from None
+    if (not isinstance(data, dict) or not isinstance(data.get("figures"), list)
+            or ("citekey" in data and data["citekey"] != citekey)):
+        raise ValueError("invalid figure manifest")
     captions = {}
-    if os.path.exists(note_path):
+    try:
         with open(note_path, encoding="utf-8") as f:
             for line in f:
                 m = _FIG_CAPTION.match(line.strip())
                 if m:
                     captions[m.group(1)] = m.group(2).strip()
-    out = []
-    for fig in data.get("figures") or []:
-        label = fig.get("label", "")
-        # The manifest's local_path can go stale (e.g. the figures moved beside
-        # the notes); fall back to <figs>/<citekey>/<label>.png when it does.
-        path = fig.get("local_path") or ""
-        if not path or not os.path.exists(path):
+    except OSError:
+        raise ValueError("note is missing or unreadable") from None
+    out, nums = [], set()
+    for fig in data["figures"]:
+        if not isinstance(fig, dict):
+            raise ValueError("invalid figure manifest entry")
+        label = fig.get("label")
+        num = _figure_number(label, nums)
+        # A stale path can be relocated when a clone keeps the same crop name.
+        path = fig.get("local_path")
+        if path is not None and not isinstance(path, str):
+            raise ValueError("invalid figure manifest path")
+        if path:
+            try:
+                os.stat(path)
+            except FileNotFoundError:
+                path = ""
+            except OSError:
+                raise ValueError(f"figure {label!r} is missing or unreadable") from None
+        if not path:
             path = os.path.join(root, citekey, label + ".png")
-        if not os.path.exists(path):
-            continue
-        num = (_FIG_LABEL.match(label).group(1) if _FIG_LABEL.match(label) else "")
         page = fig.get("page", "?")
-        display = f"Fig. {num}" if num else label
+        display = f"Fig. {num}"
         text = captions.get(num)
         if text:
             caption = f"{display}　{text}（原 PDF 第 {page} 页）"
         else:
             caption = f"{display}（原 PDF 第 {page} 页）"
         out.append((path, caption, label))
+    validate_figure_inputs("preflight", "", out)
     return out
 
 
